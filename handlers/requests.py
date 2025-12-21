@@ -156,14 +156,14 @@ async def cmd_accept(message: Message, db: aiosqlite.Connection, bot: Bot):
     
     # Проверяем, что текущий пользователь — владелец элемента
     if request["element_creator_id"] != user_id:
-        await message.answer("❌ Вы не являетесь владельцем этого элемента.")
+        await message.answer("❌ Вы не являетесь владельцем этой заявки.")
         return
     
     # Принимаем запрос
     result = await db_queries.accept_join_request(db, join_id)
     
     if not result["success"]:
-        await message.answer("❌ Не удалось принять запрос. Возможно, элемент уже заполнен.")
+        await message.answer("❌ Не удалось принять запрос. Возможно, заявка уже заполнена.")
         return
     
     # Получаем данные для уведомлений
@@ -183,7 +183,7 @@ async def cmd_accept(message: Message, db: aiosqlite.Connection, bot: Bot):
             request["requester_id"],
             f"✅ <b>Ваш запрос принят!</b>\n\n"
             f"📌 Турнир: {event['title']}\n\n"
-            f"Вы добавлены в элемент #{request['element_id']}.",
+            f"Вы добавлены в заявку #{request['element_id']}.",
             parse_mode="HTML"
         )
     except Exception:
@@ -206,7 +206,7 @@ async def cmd_accept(message: Message, db: aiosqlite.Connection, bot: Bot):
         
         await message.answer(
             f"✅ <b>Запрос #{join_id} принят!</b>\n\n"
-            f"👤 {requester.get('username', 'Пользователь')} добавлен в элемент.\n"
+            f"👤 {requester.get('username', 'Пользователь')} добавлен в заявку.\n"
             f"🪑 Осталось мест: {spots_left}",
             parse_mode="HTML"
         )
@@ -254,7 +254,7 @@ async def cmd_reject(message: Message, db: aiosqlite.Connection, bot: Bot):
     
     # Проверяем, что текущий пользователь — владелец элемента
     if request["element_creator_id"] != user_id:
-        await message.answer("❌ Вы не являетесь владельцем этого элемента.")
+        await message.answer("❌ Вы не являетесь владельцем этой заявки.")
         return
     
     # Отклоняем запрос
@@ -276,8 +276,8 @@ async def cmd_reject(message: Message, db: aiosqlite.Connection, bot: Bot):
             request["requester_id"],
             f"❌ <b>Ваш запрос отклонён</b>\n\n"
             f"📌 Турнир: {event['title']}\n"
-            f"Элемент: #{request['element_id']}\n\n"
-            f"Вы можете найти другие элементы для присоединения.",
+            f"Заявка: #{request['element_id']}\n\n"
+            f"Вы можете найти другие заявки для присоединения.",
             parse_mode="HTML"
         )
     except Exception:
@@ -333,19 +333,19 @@ async def cmd_my_requests(message: Message, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("view_requests:"))
 async def cb_view_requests(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Просмотр входящих запросов к элементу."""
+    """Просмотр входящих запросов к заявке."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     # Проверяем, что пользователь — создатель
     if element["creator_id"] != user_id:
-        await callback.answer("❌ Вы не владелец этого элемента", show_alert=True)
+        await callback.answer("❌ Вы не владелец этой заявки", show_alert=True)
         return
     
     event_id = element["event_id"]
@@ -355,7 +355,7 @@ async def cb_view_requests(callback: CallbackQuery, db: aiosqlite.Connection):
     
     await callback.message.edit_text(
         f"📥 <b>Входящие запросы</b>\n\n"
-        f"Элемент: #{element_id}\n"
+        f"Заявка: #{element_id}\n"
         f"Ожидающих: {len(requests)}",
         reply_markup=requests_list_kb(requests, element_id, event_id),
         parse_mode="HTML"
@@ -377,7 +377,7 @@ async def cb_view_request(callback: CallbackQuery, db: aiosqlite.Connection):
     
     # Проверяем, что пользователь — владелец элемента
     if request["element_creator_id"] != user_id:
-        await callback.answer("❌ Вы не владелец этого элемента", show_alert=True)
+        await callback.answer("❌ Вы не владелец этой заявки", show_alert=True)
         return
     
     if request["status"] != "pending":
@@ -416,7 +416,7 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
     
     # Проверяем, что пользователь — владелец элемента
     if request["element_creator_id"] != user_id:
-        await callback.answer("❌ Вы не владелец этого элемента", show_alert=True)
+        await callback.answer("❌ Вы не владелец этой заявки", show_alert=True)
         return
     
     if request["status"] != "pending":
@@ -447,7 +447,7 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
             request["requester_id"],
             f"✅ <b>Ваш запрос принят!</b>\n\n"
             f"📌 Турнир: {event['title']}\n\n"
-            f"Вы добавлены в элемент #{request['element_id']}.",
+            f"Вы добавлены в заявку #{request['element_id']}.",
             parse_mode="HTML"
         )
     except Exception:
@@ -474,7 +474,7 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
         
         await callback.message.edit_text(
             f"✅ <b>Запрос #{join_id} принят!</b>\n\n"
-            f"👤 {requester.get('username', 'Пользователь')} добавлен в элемент.\n"
+            f"👤 {requester.get('username', 'Пользователь')} добавлен в заявку.\n"
             f"🪑 Осталось мест: {spots_left}",
             reply_markup=manage_element_kb(request["element_id"], request["event_id"]),
             parse_mode="HTML"
@@ -495,7 +495,7 @@ async def cb_reject_request(callback: CallbackQuery, db: aiosqlite.Connection, b
     
     # Проверяем, что пользователь — владелец элемента
     if request["element_creator_id"] != user_id:
-        await callback.answer("❌ Вы не владелец этого элемента", show_alert=True)
+        await callback.answer("❌ Вы не владелец этой заявки", show_alert=True)
         return
     
     if request["status"] != "pending":
@@ -521,8 +521,8 @@ async def cb_reject_request(callback: CallbackQuery, db: aiosqlite.Connection, b
             request["requester_id"],
             f"❌ <b>Ваш запрос отклонён</b>\n\n"
             f"📌 Турнир: {event['title']}\n"
-            f"Элемент: #{request['element_id']}\n\n"
-            f"Вы можете найти другие элементы для присоединения.",
+            f"Заявка: #{request['element_id']}\n\n"
+            f"Вы можете найти другие заявки для присоединения.",
             parse_mode="HTML"
         )
     except Exception:

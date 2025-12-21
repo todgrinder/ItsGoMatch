@@ -146,7 +146,7 @@ async def show_event_details(callback: CallbackQuery, db: aiosqlite.Connection, 
         f"📝 Описание: {description}\n"
         f"📊 Статус: {status_label}\n\n"
         f"📈 <b>Статистика:</b>\n"
-        f"• Активных элементов: {stats['active_elements']}\n"
+        f"• Активных заявок: {stats['active_elements']}\n"
         f"• Сформированных групп: {stats['total_groups']}\n"
         f"• Участников в группах: {stats['users_in_groups']}\n"
         f"• Ожидающих запросов: {stats['pending_requests']}\n\n"
@@ -275,7 +275,7 @@ async def cmd_close_event(message: Message, db: aiosqlite.Connection):
         
         await message.answer(
             f"✅ Турнир «{event['title']}» закрыт.\n\n"
-            f"Новые элементы и запросы больше не принимаются."
+            f"Новые заявки и запросы больше не принимаются."
         )
     else:
         await message.answer("❌ Не удалось закрыть турнир.")
@@ -463,9 +463,9 @@ async def cb_close_event(callback: CallbackQuery, db: aiosqlite.Connection):
     await callback.message.edit_text(
         f"🔒 <b>Закрытие турнира «{event['title']}»</b>\n\n"
         f"⚠️ <b>Внимание!</b>\n"
-        f"После закрытия новые элементы и запросы не будут приниматься.\n\n"
+        f"После закрытия новые заявки и запросы не будут приниматься.\n\n"
         f"📊 Текущая статистика:\n"
-        f"• Активных элементов: {stats['active_elements']}\n"
+        f"• Активных заявок: {stats['active_elements']}\n"
         f"• Ожидающих запросов: {stats['pending_requests']}\n"
         f"• Сформированных групп: {stats['total_groups']}\n\n"
         f"Вы уверены?",
@@ -489,7 +489,7 @@ async def cb_confirm_close_event(callback: CallbackQuery, db: aiosqlite.Connecti
         
         await callback.message.edit_text(
             f"✅ <b>Турнир «{event['title']}» закрыт</b>\n\n"
-            f"Новые элементы и запросы больше не принимаются.\n"
+            f"Новые заявки и запросы больше не принимаются.\n"
             f"Уже сформированные группы сохранены.",
             reply_markup=main_menu_kb(),
             parse_mode="HTML"
@@ -535,12 +535,6 @@ async def cb_event_groups(callback: CallbackQuery, db: aiosqlite.Connection):
         parse_mode="HTML"
     )
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("edit_event:"))
-async def cb_edit_event(callback: CallbackQuery):
-    """Редактирование турнира (пока не реализовано)."""
-    await callback.answer("✏️ Редактирование турнира пока недоступно", show_alert=True)
 
 
 # ==================== FSM HANDLERS ====================
@@ -595,7 +589,7 @@ async def fsm_event_type(callback: CallbackQuery, state: FSMContext):
         today = date.today()
         await callback.message.edit_text(
             "✅ Тип: <b>👥 Пары (2 человека)</b>\n\n"
-            "Шаг 3/5: Выберите дату проведения турнира:\n\n"
+            "Шаг 3/5: Выберите дату начала проведения турнира:\n\n"
             "<i>Турнир автоматически закроется на следующий день после указанной даты</i>",
             reply_markup=date_picker_kb(today.year, today.month),
             parse_mode="HTML"
@@ -615,7 +609,7 @@ async def fsm_team_size(callback: CallbackQuery, state: FSMContext):
     today = date.today()
     await callback.message.edit_text(
         f"✅ Размер команды: <b>{team_size} человек</b>\n\n"
-        "Шаг 4/5: Выберите дату проведения турнира:\n\n"
+        "Шаг 4/5: Выберите дату начала проведения турнира:\n\n"
         "<i>Турнир автоматически закроется на следующий день после указанной даты</i>",
         reply_markup=date_picker_kb(today.year, today.month),
         parse_mode="HTML"
@@ -679,7 +673,7 @@ async def fsm_calendar_change(callback: CallbackQuery, state: FSMContext):
     """Изменить дату."""
     today = date.today()
     await callback.message.edit_text(
-        "📅 Выберите дату проведения турнира:",
+        "📅 Выберите дату начала проведения турнира:",
         reply_markup=date_picker_kb(today.year, today.month)
     )
     await callback.answer()
@@ -843,7 +837,7 @@ async def cb_edit_event_date(callback: CallbackQuery, state: FSMContext, db: aio
     await callback.message.edit_text(
         f"✏️ <b>Изменение даты</b>\n\n"
         f"Текущая дата: <b>{date_text}</b>\n\n"
-        f"Выберите новую дату проведения турнира:\n\n"
+        f"Выберите новую дату начала проведения турнира:\n\n"
         f"<i>Турнир автоматически закроется на следующий день после указанной даты</i>",
         reply_markup=date_picker_kb(today.year, today.month),
         parse_mode="HTML"

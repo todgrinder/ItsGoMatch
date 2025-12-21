@@ -123,7 +123,7 @@ async def cmd_add_solo(message: Message, db: aiosqlite.Connection, state: FSMCon
     if has_element:
         await message.answer(
             "❌ Вы уже добавлены в этот турнир.\n\n"
-            "Используйте /my_elements для просмотра ваших элементов."
+            "Используйте /my_elements для просмотра ваших заявок."
         )
         return
     
@@ -212,7 +212,7 @@ async def cmd_add_partial(message: Message, db: aiosqlite.Connection):
     if has_element:
         await message.answer(
             "❌ Вы уже добавлены в этот турнир.\n\n"
-            "Используйте /my_elements для просмотра ваших элементов."
+            "Используйте /my_elements для просмотра ваших заявок."
         )
         return
     
@@ -236,7 +236,7 @@ async def cmd_add_partial(message: Message, db: aiosqlite.Connection):
 
 @router.message(Command("my_elements"))
 async def cmd_my_elements(message: Message, db: aiosqlite.Connection):
-    """Мои элементы в турнире: /my_elements 123."""
+    """Мои заявки в турнире: /my_elements 123."""
     user_id = message.from_user.id
     
     # Проверяем регистрацию
@@ -255,8 +255,8 @@ async def cmd_my_elements(message: Message, db: aiosqlite.Connection):
         
         if not elements:
             await message.answer(
-                "📦 <b>Мои элементы</b>\n\n"
-                "У вас пока нет активных элементов.\n"
+                "📦 <b>Мои заявки</b>\n\n"
+                "У вас пока нет активных заявок.\n"
                 "Добавьте себя в турнир с помощью /add_solo &lt;event_id&gt;",
                 reply_markup=main_menu_kb(),
                 parse_mode="HTML"
@@ -266,10 +266,10 @@ async def cmd_my_elements(message: Message, db: aiosqlite.Connection):
         elements_text = ""
         for elem in elements[:10]:  # Максимум 10
             event_title = elem.get("event_title", f"Турнир #{elem['event_id']}")
-            elements_text += f"\n• {event_title} — элемент #{elem['element_id']}"
+            elements_text += f"\n• {event_title} — заявка #{elem['element_id']}"
         
         await message.answer(
-            f"📦 <b>Мои элементы ({len(elements)})</b>\n"
+            f"📦 <b>Мои заявки ({len(elements)})</b>\n"
             f"{elements_text}\n\n"
             f"Для просмотра в конкретном турнире:\n"
             f"/my_elements &lt;event_id&gt;",
@@ -295,8 +295,8 @@ async def cmd_my_elements(message: Message, db: aiosqlite.Connection):
     
     if not elements:
         await message.answer(
-            f"📦 <b>Мои элементы в турнире «{event['title']}»</b>\n\n"
-            "У вас нет элементов в этом турнире.\n"
+            f"📦 <b>Мои заявки в турнире «{event['title']}»</b>\n\n"
+            "У вас нет заявок в этом турнире.\n"
             f"Добавьте себя: /add_solo {event_id}",
             reply_markup=event_menu_kb(event_id, is_owner=(event["owner_id"] == user_id)),
             parse_mode="HTML"
@@ -304,7 +304,7 @@ async def cmd_my_elements(message: Message, db: aiosqlite.Connection):
         return
     
     await message.answer(
-        f"📦 <b>Мои элементы в турнире «{event['title']}»</b>",
+        f"📦 <b>Мои заявки в турнире «{event['title']}»</b>",
         reply_markup=my_elements_kb(elements, event_id),
         parse_mode="HTML"
     )
@@ -590,7 +590,7 @@ async def fsm_teammates_input(message: Message, state: FSMContext, db: aiosqlite
 
 @router.message(AddElementFSM.waiting_description)
 async def fsm_element_description(message: Message, state: FSMContext, db: aiosqlite.Connection, bot: Bot):
-    """Получили описание элемента."""
+    """Получили описание заявки."""
     description = message.text.strip()
     if description == "-":
         description = None
@@ -651,7 +651,7 @@ async def fsm_element_description(message: Message, state: FSMContext, db: aiosq
                     f"👥 <b>Вы добавлены в команду!</b>\n\n"
                     f"📌 Турнир: {event_title}\n"
                     f"👤 Вас добавил: {creator.get('username', 'Участник')}\n"
-                    f"📦 Элемент: #{element_id}\n\n"
+                    f"📦 Заявка: #{element_id}\n\n"
                     f"Посмотреть детали: /my_elements {event_id}",
                     parse_mode="HTML"
                 )
@@ -661,7 +661,7 @@ async def fsm_element_description(message: Message, state: FSMContext, db: aiosq
     await message.answer(
         f"✅ <b>{'Команда' if len(initial_members) > 1 else 'Вы'} добавлена в турнир!</b>\n\n"
         f"📌 Турнир: {event_title}\n"
-        f"📦 Элемент: #{element_id}\n"
+        f"📦 Заявка: #{element_id}\n"
         f"📝 Описание: {description or '—'}\n\n"
         f"👤 Участники ({len(initial_members)}/{target_size}):\n"
         f"{members_text}\n\n"
@@ -676,7 +676,7 @@ async def fsm_element_description(message: Message, state: FSMContext, db: aiosq
 
 @router.callback_query(F.data.startswith("my_elements:"))
 async def cb_my_elements(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Кнопка «Мои элементы»."""
+    """Кнопка «Мои заявки»."""
     event_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
@@ -690,7 +690,7 @@ async def cb_my_elements(callback: CallbackQuery, db: aiosqlite.Connection):
     elements = await db_queries.get_user_elements(db, event_id, user_id)
     
     await callback.message.edit_text(
-        f"📦 <b>Мои элементы в турнире «{event['title']}»</b>",
+        f"📦 <b>Мои заявки в турнире «{event['title']}»</b>",
         reply_markup=my_elements_kb(elements, event_id),
         parse_mode="HTML"
     )
@@ -699,20 +699,20 @@ async def cb_my_elements(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("manage_element:"))
 async def cb_manage_element(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Управление своим элементом."""
+    """Управление своими заявками."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     # Проверяем, что пользователь — создатель или участник
     is_member = await db_queries.check_user_in_element(db, element_id, user_id)
     if not is_member and element["creator_id"] != user_id:
-        await callback.answer("❌ Это не ваш элемент", show_alert=True)
+        await callback.answer("❌ Это не ваша заявка", show_alert=True)
         return
     
     event_id = element["event_id"]
@@ -742,7 +742,7 @@ async def cb_manage_element(callback: CallbackQuery, db: aiosqlite.Connection):
     creator_text = " (вы создатель)" if is_creator else ""
     
     await callback.message.edit_text(
-        f"⚙️ <b>Элемент #{element_id}</b>{creator_text}\n\n"
+        f"⚙️ <b>Заявка #{element_id}</b>{creator_text}\n\n"
         f"📝 Описание: {description}\n"
         f"👥 Участники ({len(members)}/{target_size}):\n{members_text}"
         f"{avg_rating_text}\n"
@@ -756,26 +756,26 @@ async def cb_manage_element(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("element_members:"))
 async def cb_element_members(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Показать участников элемента."""
+    """Показать участников заявки."""
     element_id = int(callback.data.split(":")[1])
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     # Получаем участников
     members = await db_queries.get_element_members(db, element_id)
     
     if not members:
-        await callback.answer("📭 В элементе пока нет участников", show_alert=True)
+        await callback.answer("📭 В заявке пока нет участников", show_alert=True)
         return
     
     members_text = "\n".join([f"• {format_member_info(m)}" for m in members])
     
     await callback.message.edit_text(
-        f"👥 <b>Участники элемента #{element_id}</b>\n\n"
+        f"👥 <b>Участники заявки #{element_id}</b>\n\n"
         f"{members_text}",
         reply_markup=manage_element_kb(element_id, element["event_id"]),
         parse_mode="HTML"
@@ -785,19 +785,19 @@ async def cb_element_members(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("delete_element:"))
 async def cb_delete_element(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Удаление элемента — показать подтверждение."""
+    """Удаление заявки — показать подтверждение."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     # Проверяем, что пользователь — создатель
     if element["creator_id"] != user_id:
-        await callback.answer("❌ Только создатель может удалить элемент", show_alert=True)
+        await callback.answer("❌ Только создатель может удалить заявку", show_alert=True)
         return
     
     # Получаем количество участников
@@ -805,10 +805,10 @@ async def cb_delete_element(callback: CallbackQuery, db: aiosqlite.Connection):
     pending_requests = await db_queries.get_pending_requests_for_element(db, element_id)
     
     await callback.message.edit_text(
-        f"🗑 <b>Удаление элемента #{element_id}</b>\n\n"
+        f"🗑 <b>Удаление заявки #{element_id}</b>\n\n"
         f"⚠️ <b>Внимание!</b>\n"
         f"Будут удалены:\n"
-        f"• Элемент и все его данные\n"
+        f"• Заявка и все ее данные\n"
         f"• Участники: {len(members)}\n"
         f"• Ожидающие запросы: {len(pending_requests)}\n\n"
         f"Вы уверены?",
@@ -820,19 +820,19 @@ async def cb_delete_element(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("confirm:delete_element:"))
 async def cb_confirm_delete_element(callback: CallbackQuery, db: aiosqlite.Connection, bot: Bot):
-    """Подтверждение удаления элемента."""
+    """Подтверждение удаления заявки."""
     element_id = int(callback.data.split(":")[2])
     user_id = callback.from_user.id
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     # Проверяем права
     if element["creator_id"] != user_id:
-        await callback.answer("❌ Только создатель может удалить элемент", show_alert=True)
+        await callback.answer("❌ Только создатель может удалить заявку", show_alert=True)
         return
     
     event_id = element["event_id"]
@@ -858,28 +858,28 @@ async def cb_confirm_delete_element(callback: CallbackQuery, db: aiosqlite.Conne
                 try:
                     await bot.send_message(
                         member["user_id"],
-                        f"❌ <b>Элемент удалён</b>\n\n"
-                        f"Элемент #{element_id} в турнире «{event['title']}» был удалён создателем.\n\n"
-                        f"Вы можете найти другие элементы для присоединения.",
+                        f"❌ <b>Заявка удалёна</b>\n\n"
+                        f"Заявка #{element_id} в турнире «{event['title']}» был удалён создателем.\n\n"
+                        f"Вы можете найти другие заявки для присоединения.",
                         parse_mode="HTML"
                     )
                 except Exception:
                     pass
         
         await callback.message.edit_text(
-            f"✅ <b>Элемент #{element_id} удалён</b>\n\n"
+            f"✅ <b>Заявка #{element_id} удалёна</b>\n\n"
             f"Все участники были уведомлены.",
             reply_markup=event_menu_kb(event_id, is_owner=(event["owner_id"] == user_id)),
             parse_mode="HTML"
         )
-        await callback.answer("Элемент удалён")
+        await callback.answer("Заявка удалёна")
     else:
-        await callback.answer("❌ Не удалось удалить элемент", show_alert=True)
+        await callback.answer("❌ Не удалось удалить заявку", show_alert=True)
 
 
 @router.callback_query(F.data == "back_my_elements")
 async def cb_back_my_elements(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection):
-    """Возврат к списку своих элементов."""
+    """Возврат к списку своих заявок."""
     # Пытаемся получить event_id из state или показываем все элементы
     data = await state.get_data()
     event_id = data.get("last_event_id")
@@ -890,7 +890,7 @@ async def cb_back_my_elements(callback: CallbackQuery, state: FSMContext, db: ai
         if event:
             elements = await db_queries.get_user_elements(db, event_id, user_id)
             await callback.message.edit_text(
-                f"📦 <b>Мои элементы в турнире «{event['title']}»</b>",
+                f"📦 <b>Мои заявки в турнире «{event['title']}»</b>",
                 reply_markup=my_elements_kb(elements, event_id),
                 parse_mode="HTML"
             )

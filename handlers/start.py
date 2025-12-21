@@ -131,8 +131,8 @@ async def cmd_help(message: Message):
 
 <b>Элементы (пары/команды):</b>
 /add_solo &lt;event_id&gt; — Добавить себя как одиночку
-/my_elements &lt;event_id&gt; — Мои элементы в турнире
-/search &lt;event_id&gt; — Поиск свободных элементов
+/my_elements &lt;event_id&gt; — Мои заявки в турнире
+/search &lt;event_id&gt; — Поиск свободных заявок
 
 <b>Запросы:</b>
 /accept &lt;join_id&gt; — Принять запрос

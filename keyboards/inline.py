@@ -231,7 +231,7 @@ def event_menu_kb(event_id: int, is_owner: bool = False) -> InlineKeyboardMarkup
         InlineKeyboardButton(text="➕ Добавить себя", callback_data=f"add_element:{event_id}")
     )
     builder.row(
-        InlineKeyboardButton(text="📦 Мои элементы", callback_data=f"my_elements:{event_id}"),
+        InlineKeyboardButton(text="📦 Мои заявки", callback_data=f"my_elements:{event_id}"),
         InlineKeyboardButton(text="✅ Сформированные", callback_data=f"event_groups:{event_id}")
     )
     if is_owner:
@@ -267,21 +267,24 @@ def edit_event_kb(event_id: int) -> InlineKeyboardMarkup:
 # ==================== СПИСОК ЭЛЕМЕНТОВ ====================
 
 def elements_list_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
-    """Список свободных элементов для присоединения."""
+    """Список свободных заявок для присоединения."""
     builder = InlineKeyboardBuilder()
     for elem in elements:
         elem_id = elem.get("element_id")
         spots_left = elem.get("spots_left", "?")
         members_info = elem.get("members_info", "")
+        gender_icon = "👨" if elem.get("gender") == "male" else "👩" if elem.get("gender") == "female" else "👤"
+        username = elem.get("username", "Без имени")
+        rating = elem.get("rating", "?")
         builder.row(
             InlineKeyboardButton(
-                text=f"🎯 Мест: {spots_left} | {members_info}",
+                text=f"🎯 {gender_icon} {username} | {members_info}",
                 callback_data=f"view_element:{elem_id}"
             )
         )
     if not elements:
         builder.row(
-            InlineKeyboardButton(text="📭 Нет свободных элементов", callback_data="noop")
+            InlineKeyboardButton(text="📭 Нет свободных заявок", callback_data="noop")
         )
     builder.row(InlineKeyboardButton(text="🔙 К турниру", callback_data=f"event:view:{event_id}"))
     return builder.as_markup()
@@ -290,7 +293,7 @@ def elements_list_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
 # ==================== ДЕТАЛИ ЭЛЕМЕНТА ====================
 
 def element_detail_kb(element_id: int, event_id: int, can_join: bool = True) -> InlineKeyboardMarkup:
-    """Детали элемента с кнопкой присоединения."""
+    """Детали заявки с кнопкой присоединения."""
     builder = InlineKeyboardBuilder()
     if can_join:
         builder.row(
@@ -315,7 +318,7 @@ def join_request_kb(join_id: int) -> InlineKeyboardMarkup:
 # ==================== МОИ ЭЛЕМЕНТЫ ====================
 
 def my_elements_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
-    """Список собственных элементов пользователя."""
+    """Список собственных заявок пользователя."""
     builder = InlineKeyboardBuilder()
     for elem in elements:
         elem_id = elem.get("element_id")
@@ -331,7 +334,7 @@ def my_elements_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
         )
     if not elements:
         builder.row(
-            InlineKeyboardButton(text="📭 У вас нет элементов", callback_data="noop")
+            InlineKeyboardButton(text="📭 У вас нет заявок", callback_data="noop")
         )
     builder.row(
         InlineKeyboardButton(text="➕ Создать новый", callback_data=f"add_element:{event_id}")
@@ -343,7 +346,7 @@ def my_elements_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
 # ==================== УПРАВЛЕНИЕ ЭЛЕМЕНТОМ ====================
 
 def manage_element_kb(element_id: int, event_id: int) -> InlineKeyboardMarkup:
-    """Меню управления собственным элементом."""
+    """Меню управления собственными заявками."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="👀 Входящие запросы", callback_data=f"view_requests:{element_id}")
@@ -352,14 +355,14 @@ def manage_element_kb(element_id: int, event_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="👥 Участники", callback_data=f"element_members:{element_id}"),
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_element:{element_id}")
     )
-    builder.row(InlineKeyboardButton(text="🔙 Мои элементы", callback_data=f"my_elements:{event_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 Мои заявки", callback_data=f"my_elements:{event_id}"))
     return builder.as_markup()
 
 
 # ==================== СПИСОК ЗАПРОСОВ ====================
 
 def requests_list_kb(requests: list, element_id: int, event_id: int) -> InlineKeyboardMarkup:
-    """Список входящих запросов к элементу."""
+    """Список входящих запросов к заявке."""
     builder = InlineKeyboardBuilder()
     for req in requests:
         join_id = req.get("join_id")
@@ -377,7 +380,7 @@ def requests_list_kb(requests: list, element_id: int, event_id: int) -> InlineKe
         builder.row(
             InlineKeyboardButton(text="📭 Нет входящих запросов", callback_data="noop")
         )
-    builder.row(InlineKeyboardButton(text="🔙 К элементу", callback_data=f"manage_element:{element_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 К заявке", callback_data=f"manage_element:{element_id}"))
     return builder.as_markup()
 
 

@@ -36,7 +36,7 @@ def format_members_list(members: list) -> str:
 
 @router.message(Command("search"))
 async def cmd_search(message: Message, db: aiosqlite.Connection):
-    """Поиск свободных элементов: /search 123."""
+    """Поиск свободных заявок: /search 123."""
     user_id = message.from_user.id
     
     # Проверяем регистрацию
@@ -101,7 +101,7 @@ async def cmd_search(message: Message, db: aiosqlite.Connection):
     await message.answer(
         f"🔎 <b>Свободные места в турнире «{event['title']}»</b>\n\n"
         f"🎯 Тип: {type_label}\n"
-        f"📊 Найдено элементов: {len(filtered_elements)}",
+        f"📊 Найдено заявок: {len(filtered_elements)}",
         reply_markup=elements_list_kb(filtered_elements, event_id),
         parse_mode="HTML"
     )
@@ -155,8 +155,8 @@ async def cb_search_elements(callback: CallbackQuery, db: aiosqlite.Connection):
         await callback.message.edit_text(
             f"🔎 <b>Свободные места в турнире «{event['title']}»</b>\n\n"
             f"🎯 Тип: {type_label}\n"
-            f"📊 Найдено элементов: {len(filtered_elements)}\n\n"
-            "Выберите элемент для просмотра:",
+            f"📊 Найдено заявок: {len(filtered_elements)}\n\n"
+            "Выберите заявку для просмотра:",
             reply_markup=elements_list_kb(filtered_elements, event_id),
             parse_mode="HTML"
         )
@@ -165,18 +165,18 @@ async def cb_search_elements(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("view_element:"))
 async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Просмотр деталей элемента."""
+    """Просмотр деталей заявки."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     if not element.get("is_active"):
-        await callback.answer("❌ Этот элемент уже неактивен", show_alert=True)
+        await callback.answer("❌ Эта заявка уже неактивен", show_alert=True)
         return
     
     event_id = element["event_id"]
@@ -200,7 +200,7 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
     # Формируем статус
     status_text = ""
     if is_member:
-        status_text = "\n\n✅ <i>Вы уже в этом элементе</i>"
+        status_text = "\n\n✅ <i>Вы уже в этой заявке</i>"
     elif has_pending_request:
         status_text = "\n\n⏳ <i>Ваш запрос ожидает рассмотрения</i>"
     
@@ -213,7 +213,7 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
         avg_rating_text = ""
     
     await callback.message.edit_text(
-        f"🎯 <b>Элемент #{element_id}</b>\n\n"
+        f"🎯 <b>Заявка #{element_id}</b>\n\n"
         f"📝 Описание: {description}\n"
         f"👥 Участники ({len(members)}/{target_size}):\n{members_text}\n"
         f"🪑 Свободных мест: {spots_left}"
@@ -227,7 +227,7 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("join_element:"))
 async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot: Bot):
-    """Кнопка «Присоединиться» к элементу."""
+    """Кнопка «Присоединиться» к заявке."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
@@ -242,11 +242,11 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
     # Получаем элемент
     element = await db_queries.get_element(db, element_id)
     if not element:
-        await callback.answer("❌ Элемент не найден", show_alert=True)
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     if not element.get("is_active"):
-        await callback.answer("❌ Этот элемент уже неактивен", show_alert=True)
+        await callback.answer("❌ Эта заявка уже неактивна", show_alert=True)
         return
     
     event_id = element["event_id"]
@@ -260,19 +260,19 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
     # Проверяем, что пользователь не в этом элементе
     is_member = await db_queries.check_user_in_element(db, element_id, user_id)
     if is_member:
-        await callback.answer("❌ Вы уже в этом элементе", show_alert=True)
+        await callback.answer("❌ Вы уже в этой заявке", show_alert=True)
         return
     
     # Проверяем, что нет активного запроса
     has_pending_request = await db_queries.check_existing_request(db, element_id, user_id)
     if has_pending_request:
-        await callback.answer("❌ Вы уже отправили запрос к этому элементу", show_alert=True)
+        await callback.answer("❌ Вы уже отправили запрос к этой заявке", show_alert=True)
         return
     
     # Проверяем, есть ли свободные места
     spots_left = await db_queries.get_element_spots_left(db, element_id)
     if spots_left <= 0:
-        await callback.answer("❌ В этом элементе больше нет свободных мест", show_alert=True)
+        await callback.answer("❌ В этом заявке больше нет свободных мест", show_alert=True)
         return
     
     # Создаём запрос на присоединение
@@ -297,7 +297,7 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
         await bot.send_message(
             creator_id,
             f"📨 <b>Новый запрос на присоединение!</b>\n\n"
-            f"К вашему элементу в турнире «{event['title']}»\n\n"
+            f"К вашей заявке в турнире «{event['title']}»\n\n"
             f"{gender_icon} <b>{requester.get('username', 'Без имени')}</b>\n"
             f"📊 Рейтинг: {requester.get('rating', '?')}\n\n"
             f"Принять этого участника?",
@@ -313,9 +313,9 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
     # Обновляем сообщение
     await callback.message.edit_text(
         f"📨 <b>Запрос отправлен!</b>\n\n"
-        f"Элемент: #{element_id}\n"
+        f"Заявка: #{element_id}\n"
         f"Турнир: {event['title']}\n\n"
-        "Владелец элемента получит уведомление и сможет принять или отклонить вашу заявку.\n\n"
+        "Владелец заявки получит уведомление и сможет принять или отклонить вашу заявку.\n\n"
         "⏳ Ожидайте ответа.",
         reply_markup=main_menu_kb(),
         parse_mode="HTML"

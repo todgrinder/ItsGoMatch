@@ -58,7 +58,7 @@ async def show_profile(message_or_callback, db: aiosqlite.Connection, user_id: i
         f"🚻 Пол: {gender}\n"
         f"📊 Рейтинг: <b>{rating_text}</b>\n\n"
         f"📈 <b>Статистика:</b>\n"
-        f"• Активные элементы: {len(user_elements)}\n"
+        f"• Активные заявки: {len(user_elements)}\n"
         f"• Сформированные группы: {len(user_groups)}\n"
         f"• Отправленные запросы: {len(pending_sent)}\n"
         f"• Входящие запросы: {len(pending_incoming)}"
