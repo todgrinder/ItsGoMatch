@@ -1240,3 +1240,86 @@ async def get_event_full_info(db: aiosqlite.Connection, event_id: int) -> Option
         "owner": owner,
         "stats": stats
     }
+
+# ==================== ELEMENTS (добавить новую функцию) ====================
+
+async def get_all_user_elements_in_open_events(db: aiosqlite.Connection, user_id: int) -> List[Dict[str, Any]]:
+    """
+    Получить все заявки пользователя в открытых турнирах.
+    Включает заявки где пользователь создатель или участник.
+    """
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT
+            e.element_id,
+            e.event_id,
+            e.creator_id,
+            e.target_size,
+            e.description,
+            e.created_at,
+            e.is_active,
+            ev.title as event_title,
+            ev.type as event_type,
+            ev.event_date,
+            (SELECT COUNT(*) FROM element_members em WHERE em.element_id = e.element_id) as members_count,
+            (SELECT COUNT(*) FROM join_requests jr WHERE jr.element_id = e.element_id AND jr.status = 'pending') as pending_requests
+        FROM elements e
+        LEFT JOIN element_members em ON e.element_id = em.element_id
+        LEFT JOIN events ev ON e.event_id = ev.event_id
+        WHERE e.is_active = 1
+          AND ev.status = 'open'
+          AND (e.creator_id = ? OR em.user_id = ?)
+        ORDER BY ev.event_date ASC NULLS LAST, e.created_at DESC
+        """,
+        (user_id, user_id)
+    )
+    rows = await cursor.fetchall()
+    return rows_to_list(rows)
+
+
+async def leave_element(db: aiosqlite.Connection, element_id: int, user_id: int) -> bool:
+    """
+    Покинуть заявку (удалить себя из участников).
+    Если пользователь — создатель, заявка удаляется полностью.
+    Возвращает True если операция успешна.
+    """
+    # Получаем заявку
+    element = await get_element(db, element_id)
+    if not element:
+        return False
+    
+    # Проверяем, является ли пользователь участником
+    is_member = await check_user_in_element(db, element_id, user_id)
+    if not is_member:
+        return False
+    
+    # Если пользователь — создатель, удаляем всю заявку
+    if element["creator_id"] == user_id:
+        cursor = await db.execute(
+            "DELETE FROM elements WHERE element_id = ?",
+            (element_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+    
+    # Иначе просто удаляем пользователя из участников
+    cursor = await db.execute(
+        "DELETE FROM element_members WHERE element_id = ? AND user_id = ?",
+        (element_id, user_id)
+    )
+    await db.commit()
+    
+    # Проверяем, остались ли ещё участники (кроме создателя)
+    members = await get_element_members(db, element_id)
+    if len(members) == 1 and members[0]["user_id"] == element["creator_id"]:
+        # Остался только создатель - всё ок
+        pass
+    elif len(members) == 0:
+        # Не осталось никого - удаляем заявку
+        await db.execute(
+            "DELETE FROM elements WHERE element_id = ?",
+            (element_id,)
+        )
+        await db.commit()
+    
+    return True

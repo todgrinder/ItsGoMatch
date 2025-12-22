@@ -43,7 +43,7 @@ async def show_profile(message_or_callback, db: aiosqlite.Connection, user_id: i
     
     username = user.get("username") or "Не указано"
     rating = user.get("rating")
-    rating_text = f"{rating:.1f}" if rating is not None else "Не указан"
+    rating_text = str(int(rating)) if rating is not None else "Не указан"
     gender = GENDER_LABELS.get(user.get("gender"), "Не указан")
     
     # Получаем статистику
@@ -344,7 +344,7 @@ async def fsm_new_rating(message: Message, state: FSMContext, db: aiosqlite.Conn
     except ValueError:
         await message.answer(
             "❌ Пожалуйста, введите число.\n\n"
-            "Например: <code>1500</code> или <code>1234.5</code>",
+            "Например: <code>1500</code> или <code>1234</code>",
             parse_mode="HTML"
         )
         return
@@ -372,12 +372,12 @@ async def fsm_new_rating(message: Message, state: FSMContext, db: aiosqlite.Conn
     if old_rating is not None:
         diff = rating - old_rating
         if diff > 0:
-            change_text = f" (↑ +{diff:.1f})"
+            change_text = f" (↑ +{int(diff)})"
         elif diff < 0:
-            change_text = f" (↓ {diff:.1f})"
+            change_text = f" (↓ {int(diff)})"
     
     await message.answer(
-        f"✅ Рейтинг обновлён: <b>{rating:.1f}</b>{change_text}",
+        f"✅ Рейтинг обновлён: <b>{int(rating)}</b>{change_text}",
         reply_markup=profile_menu_kb(),
         parse_mode="HTML"
     )

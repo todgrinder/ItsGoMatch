@@ -127,11 +127,13 @@ async def cmd_help(message: Message):
 <b>Турниры:</b>
 /create_event — Создать турнир
 /list_events — Список открытых турниров
+/my_events — Мои турниры
 /close_event &lt;id&gt; — Закрыть турнир (только владелец)
 
-<b>Элементы (пары/команды):</b>
-/add_solo &lt;event_id&gt; — Добавить себя как одиночку
+<b>Заявки:</b>
+/add_solo &lt;event_id&gt; — Добавить себя в турнир
 /my_elements &lt;event_id&gt; — Мои заявки в турнире
+/my_applications — Все мои заявки
 /search &lt;event_id&gt; — Поиск свободных заявок
 
 <b>Запросы:</b>
@@ -142,6 +144,7 @@ async def cmd_help(message: Message):
 /delete_me — Удалить все мои данные
 """
     await message.answer(help_text, parse_mode="HTML")
+
 
 
 # ==================== FSM: Регистрация ====================
@@ -319,3 +322,11 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Co
 async def cb_noop(callback: CallbackQuery):
     """Пустой callback (ничего не делает)."""
     await callback.answer()
+
+# Добавить в конец файла обработчик универсальной кнопки skip (если её нажали вне FSM)
+
+@router.callback_query(F.data == "skip")
+async def cb_skip_fallback(callback: CallbackQuery):
+    """Обработка кнопки пропустить вне FSM."""
+    await callback.answer("❌ Нечего пропускать", show_alert=True)
+

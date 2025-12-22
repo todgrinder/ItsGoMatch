@@ -34,7 +34,7 @@ def format_member_with_contact(member: dict) -> str:
     """Форматировать информацию об участнике с контактом."""
     gender_icon = "👨" if member.get("gender") == "male" else "👩" if member.get("gender") == "female" else "👤"
     username = member.get("username", "Без имени")
-    rating = member.get("rating", "?")
+    rating = int(member.get("rating", 0))
     telegram_username = member.get("telegram_username")
     
     # Формируем контакт
@@ -55,6 +55,8 @@ async def notify_group_formed(bot: Bot, db: aiosqlite.Connection, group_id: int,
     if not members:
         return
     
+    avg_rating = int(group.get("rating_avg", 0))
+    
     # Формируем список участников для каждого получателя
     for recipient in members:
         recipient_id = recipient["user_id"]
@@ -65,22 +67,24 @@ async def notify_group_formed(bot: Bot, db: aiosqlite.Connection, group_id: int,
             if m["user_id"] != recipient_id:
                 other_members_text += f"\n• {format_member_with_contact(m)}"
         
-        # Информация о самом получателе
-        recipient_info = format_member_info(recipient)
-        
         try:
             if len(members) == 2:
                 # Для пары — особое сообщение
                 partner = [m for m in members if m["user_id"] != recipient_id][0]
                 partner_contact = f"@{partner['telegram_username']}" if partner.get('telegram_username') else f"<a href='tg://user?id={partner['user_id']}'>написать</a>"
+                partner_gender = GENDER_LABELS.get(partner.get("gender"), "Не указан")
+                partner_rating = int(partner.get("rating", 0))
                 
                 await bot.send_message(
                     recipient_id,
                     f"🎉 <b>Пара сформирована!</b>\n\n"
                     f"📌 Турнир: <b>{event_title}</b>\n"
-                    f"⭐ Средний рейтинг: {group.get('rating_avg', 0):.0f}\n\n"
+                    f"⭐ Средний рейтинг: {avg_rating}\n\n"
                     f"👤 <b>Ваш партнёр:</b>\n"
-                    f"• {format_member_with_contact(partner)}\n\n"
+                    f"• 📛 Имя: {partner.get('username', 'Без имени')}\n"
+                    f"• 🚻 Пол: {partner_gender}\n"
+                    f"• 📊 Рейтинг: {partner_rating}\n"
+                    f"• 📱 Контакт: {partner_contact}\n\n"
                     f"💬 Свяжитесь с партнёром для координации!\n\n"
                     f"Удачи на турнире! 🏆",
                     parse_mode="HTML"
@@ -91,7 +95,7 @@ async def notify_group_formed(bot: Bot, db: aiosqlite.Connection, group_id: int,
                     recipient_id,
                     f"🎉 <b>Команда сформирована!</b>\n\n"
                     f"📌 Турнир: <b>{event_title}</b>\n"
-                    f"⭐ Средний рейтинг команды: {group.get('rating_avg', 0):.0f}\n"
+                    f"⭐ Средний рейтинг команды: {avg_rating}\n"
                     f"👥 Участников: {len(members)}\n\n"
                     f"<b>Ваши тиммейты:</b>"
                     f"{other_members_text}\n\n"

@@ -17,8 +17,12 @@ from keyboards.inline import (
     cancel_kb,
     confirm_kb,
     event_menu_kb,
-    add_type_kb  # Новая клавиатура
+    add_type_kb,
+    skip_kb,
+    my_applications_kb,
+    application_detail_kb
 )
+
 from database import queries as db_queries
 
 router = Router()
@@ -38,7 +42,7 @@ def format_member_info(member: dict) -> str:
     """Форматировать информацию об участнике."""
     gender_icon = "👨" if member.get("gender") == "male" else "👩" if member.get("gender") == "female" else "👤"
     username = member.get("username", "Без имени")
-    rating = member.get("rating", "?")
+    rating = int(member.get("rating", 0))
     return f"{gender_icon} {username} — рейтинг: {rating}"
 
 
@@ -373,7 +377,7 @@ async def cb_add_element(callback: CallbackQuery, state: FSMContext, db: aiosqli
         await callback.answer("❌ Этот турнир закрыт", show_alert=True)
         return
     
-    # Проверяем, что пользователь ещё не в элементе этого события
+    # Проверяем, что пользователь ещё не в заявке этого события
     has_element = await db_queries.check_user_has_element(db, event_id, user_id)
     if has_element:
         await callback.answer("❌ Вы уже добавлены в этот турнир", show_alert=True)
@@ -402,9 +406,8 @@ async def cb_add_element(callback: CallbackQuery, state: FSMContext, db: aiosqli
             f"➕ <b>Добавление в турнир «{event['title']}»</b>\n\n"
             f"Вы ищете пару.\n\n"
             f"Введите описание/комментарий к вашей заявке:\n"
-            f"(например, ваш опыт, предпочтения, время игры)\n\n"
-            f"Или отправьте <code>-</code> чтобы пропустить:",
-            reply_markup=cancel_kb(),
+            f"(например, ваш опыт, предпочтения, время игры)",
+            reply_markup=skip_kb(),  # Изменено с cancel_kb()
             parse_mode="HTML"
         )
     else:
@@ -437,9 +440,8 @@ async def fsm_add_type_solo(callback: CallbackQuery, state: FSMContext):
         f"➕ <b>Добавление в турнир «{data['event_title']}»</b>\n\n"
         f"Вы ищете команду ({data['target_size']} чел.).\n\n"
         f"Введите описание/комментарий к вашей заявке:\n"
-        f"(например, ваш опыт, предпочтения, время игры)\n\n"
-        f"Или отправьте <code>-</code> чтобы пропустить:",
-        reply_markup=cancel_kb(),
+        f"(например, ваш опыт, предпочтения, время игры)",
+        reply_markup=skip_kb(),  # Изменено с cancel_kb()
         parse_mode="HTML"
     )
     await callback.answer()
@@ -528,7 +530,7 @@ async def fsm_teammates_input(message: Message, state: FSMContext, db: aiosqlite
                 )
                 return
             
-            # Проверяем, не состоит ли уже в элементе этого события
+            # Проверяем, не состоит ли уже в заявке этого события
             has_element = await db_queries.check_user_has_element(db, data["event_id"], user_data["user_id"])
             if has_element:
                 await message.answer(
@@ -578,12 +580,87 @@ async def fsm_teammates_input(message: Message, state: FSMContext, db: aiosqlite
         f"✅ <b>Участники команды ({len(initial_members)}/{target_size}):</b>\n\n"
         f"{members_text}\n"
         f"🪑 Свободных мест: {target_size - len(initial_members)}\n\n"
-        f"Введите описание/комментарий к вашей заявке\n"
-        f"(например, требования к недостающим участникам)\n\n"
-        f"Или отправьте <code>-</code> чтобы пропустить:",
-        reply_markup=cancel_kb(),
+        f"Введите описание/комментарий к вашей заявке:\n"
+        f"(например, требования к недостающим участникам)",
+        reply_markup=skip_kb(),  # Изменено с cancel_kb()
         parse_mode="HTML"
     )
+
+
+@router.callback_query(AddElementFSM.waiting_description, F.data == "skip")
+async def fsm_skip_description(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection, bot: Bot):
+    """Пропустить ввод описания."""
+    # Вызываем обработчик с пустым описанием
+    data = await state.get_data()
+    await state.clear()
+    
+    event_id = data["event_id"]
+    event_title = data["event_title"]
+    target_size = data["target_size"]
+    initial_members = data.get("initial_members", [callback.from_user.id])
+    user_id = callback.from_user.id
+    description = None  # Пропускаем описание
+    
+    # Ещё раз проверяем, что пользователь не добавлен (на случай race condition)
+    has_element = await db_queries.check_user_has_element(db, event_id, user_id)
+    if has_element:
+        await callback.message.edit_text(
+            "❌ Вы уже добавлены в этот турнир.",
+            reply_markup=main_menu_kb()
+        )
+        await callback.answer()
+        return
+    
+    # Создаём заявку
+    element_id = await db_queries.create_element(
+        db,
+        event_id=event_id,
+        creator_id=user_id,
+        target_size=target_size,
+        initial_members=initial_members,
+        description=description
+    )
+    
+    # Логируем
+    await db_queries.create_log(
+        db,
+        "element_created",
+        f"element_id={element_id}, event_id={event_id}, creator_id={user_id}, members={len(initial_members)}"
+    )
+    
+    # Получаем всех участников для отображения
+    members = await db_queries.get_element_members(db, element_id)
+    members_text = "\n".join([f"• {format_member_info(m)}" for m in members])
+    
+    # Уведомляем добавленных участников (кроме создателя)
+    for member_id in initial_members:
+        if member_id != user_id:
+            try:
+                creator = await db_queries.get_user(db, user_id)
+                await bot.send_message(
+                    member_id,
+                    f"👥 <b>Вы добавлены в команду!</b>\n\n"
+                    f"📌 Турнир: {event_title}\n"
+                    f"👤 Вас добавил: {creator.get('username', 'Участник')}\n"
+                    f"📦 Заявка: #{element_id}\n\n"
+                    f"Посмотреть детали: /my_elements {event_id}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    
+    await callback.message.edit_text(
+        f"✅ <b>{'Команда' if len(initial_members) > 1 else 'Вы'} добавлена в турнир!</b>\n\n"
+        f"📌 Турнир: {event_title}\n"
+        f"📦 Заявка: #{element_id}\n\n"
+        f"👤 Участники ({len(initial_members)}/{target_size}):\n"
+        f"{members_text}\n\n"
+        f"🪑 Свободных мест: {target_size - len(initial_members)}\n\n"
+        f"Теперь другие участники могут найти вас и отправить запрос на присоединение.",
+        reply_markup=main_menu_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 # ==================== FSM: Описание ====================
@@ -592,12 +669,11 @@ async def fsm_teammates_input(message: Message, state: FSMContext, db: aiosqlite
 async def fsm_element_description(message: Message, state: FSMContext, db: aiosqlite.Connection, bot: Bot):
     """Получили описание заявки."""
     description = message.text.strip()
-    if description == "-":
-        description = None
-    elif len(description) > 300:
+    
+    if len(description) > 300:
         await message.answer(
             "❌ Описание слишком длинное (максимум 300 символов).\n\n"
-            "Введите описание или отправьте <code>-</code> чтобы пропустить:",
+            "Введите описание:",
             parse_mode="HTML"
         )
         return
@@ -620,7 +696,7 @@ async def fsm_element_description(message: Message, state: FSMContext, db: aiosq
         )
         return
     
-    # Создаём элемент
+    # Создаём заявку
     element_id = await db_queries.create_element(
         db,
         event_id=event_id,
@@ -662,7 +738,7 @@ async def fsm_element_description(message: Message, state: FSMContext, db: aiosq
         f"✅ <b>{'Команда' if len(initial_members) > 1 else 'Вы'} добавлена в турнир!</b>\n\n"
         f"📌 Турнир: {event_title}\n"
         f"📦 Заявка: #{element_id}\n"
-        f"📝 Описание: {description or '—'}\n\n"
+        f"📝 Описание: {description}\n\n"
         f"👤 Участники ({len(initial_members)}/{target_size}):\n"
         f"{members_text}\n\n"
         f"🪑 Свободных мест: {target_size - len(initial_members)}\n\n"
@@ -699,11 +775,11 @@ async def cb_my_elements(callback: CallbackQuery, db: aiosqlite.Connection):
 
 @router.callback_query(F.data.startswith("manage_element:"))
 async def cb_manage_element(callback: CallbackQuery, db: aiosqlite.Connection):
-    """Управление своими заявками."""
+    """Управление своей заявкой."""
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
-    # Получаем элемент
+    # Получаем заявку
     element = await db_queries.get_element(db, element_id)
     if not element:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
@@ -730,11 +806,11 @@ async def cb_manage_element(callback: CallbackQuery, db: aiosqlite.Connection):
     
     members_text = "\n".join([f"• {format_member_info(m)}" for m in members]) if members else "Никого"
     
-    # Рассчитываем средний рейтинг
+    # Рассчитываем средний рейтинг (целое число)
     if members:
         ratings = [m["rating"] for m in members if m.get("rating") is not None]
-        avg_rating = sum(ratings) / len(ratings) if ratings else 0
-        avg_rating_text = f"\n⭐ Средний рейтинг: {avg_rating:.0f}"
+        avg_rating = int(sum(ratings) / len(ratings)) if ratings else 0
+        avg_rating_text = f"\n⭐ Средний рейтинг: {avg_rating}"
     else:
         avg_rating_text = ""
     
@@ -905,3 +981,268 @@ async def cb_back_my_elements(callback: CallbackQuery, state: FSMContext, db: ai
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# Добавить в конец файла
+
+# ==================== МОИ ЗАЯВКИ ====================
+
+@router.message(Command("my_applications"))
+async def cmd_my_applications(message: Message, db: aiosqlite.Connection):
+    """Показать все заявки пользователя."""
+    user_id = message.from_user.id
+    
+    # Проверяем регистрацию
+    if not await db_queries.is_profile_complete(db, user_id):
+        await message.answer(
+            "❌ Сначала завершите регистрацию.\n"
+            "Используйте /start"
+        )
+        return
+    
+    # Получаем все заявки пользователя в открытых турнирах
+    elements = await db_queries.get_all_user_elements_in_open_events(db, user_id)
+    
+    if not elements:
+        await message.answer(
+            "📦 <b>Мои заявки</b>\n\n"
+            "У вас пока нет активных заявок в открытых турнирах.\n\n"
+            "Найдите турнир и добавьте себя!",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+        return
+    
+    # Формируем статистику
+    total_pending = sum(elem.get("pending_requests", 0) for elem in elements)
+    
+    await message.answer(
+        f"📦 <b>Мои заявки ({len(elements)})</b>\n\n"
+        f"📩 Всего входящих запросов: {total_pending}\n\n"
+        "Выберите заявку для просмотра:",
+        reply_markup=my_applications_kb(elements),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "my_applications")
+async def cb_my_applications(callback: CallbackQuery, db: aiosqlite.Connection):
+    """Кнопка «Мои заявки»."""
+    user_id = callback.from_user.id
+    
+    # Проверяем регистрацию
+    if not await db_queries.is_profile_complete(db, user_id):
+        await callback.answer("❌ Сначала завершите регистрацию (/start)", show_alert=True)
+        return
+    
+    # Получаем все заявки пользователя в открытых турнирах
+    elements = await db_queries.get_all_user_elements_in_open_events(db, user_id)
+    
+    if not elements:
+        await callback.message.edit_text(
+            "📦 <b>Мои заявки</b>\n\n"
+            "У вас пока нет активных заявок в открытых турнирах.\n\n"
+            "Найдите турнир и добавьте себя!",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    
+    # Формируем статистику
+    total_pending = sum(elem.get("pending_requests", 0) for elem in elements)
+    
+    await callback.message.edit_text(
+        f"📦 <b>Мои заявки ({len(elements)})</b>\n\n"
+        f"📩 Всего входящих запросов: {total_pending}\n\n"
+        "Выберите заявку для просмотра:",
+        reply_markup=my_applications_kb(elements),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_my_application:"))
+async def cb_view_my_application(callback: CallbackQuery, db: aiosqlite.Connection):
+    """Просмотр детальной информации о заявке."""
+    element_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    
+    # Получаем заявку
+    element = await db_queries.get_element(db, element_id)
+    if not element:
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
+        return
+    
+    if not element.get("is_active"):
+        await callback.answer("❌ Эта заявка уже неактивна", show_alert=True)
+        return
+    
+    event_id = element["event_id"]
+    
+    # Проверяем, что пользователь — создатель или участник
+    is_member = await db_queries.check_user_in_element(db, element_id, user_id)
+    if not is_member and element["creator_id"] != user_id:
+        await callback.answer("❌ Это не ваша заявка", show_alert=True)
+        return
+    
+    # Получаем участников
+    members = await db_queries.get_element_members(db, element_id)
+    
+    # Получаем количество ожидающих запросов
+    pending_requests = await db_queries.get_pending_requests_for_element(db, element_id)
+    
+    # Формируем информацию
+    target_size = element["target_size"]
+    spots_left = target_size - len(members)
+    description = element.get("description") or "—"
+    event_title = element.get("event_title", "Турнир")
+    event_date = element.get("event_date")
+    event_type = element.get("event_type", "pair")
+    
+    # Дата турнира
+    from handlers.events import format_date_ru, get_days_until
+    date_text = format_date_ru(event_date) if event_date else "Не указана"
+    days_until = get_days_until(event_date) if event_date else ""
+    date_line = f"📅 Дата турнира: {date_text}"
+    if days_until:
+        date_line += f" ({days_until})"
+    
+    is_creator = element["creator_id"] == user_id
+    role_text = "создатель" if is_creator else "участник"
+    
+    # Формируем информацию в зависимости от типа турнира
+    if event_type == "pair":
+        # Для пар показываем детальную информацию
+        if members:
+            member = members[0]
+            gender_label = GENDER_LABELS.get(member.get("gender"), "Не указан")
+            username = member.get("username", "Без имени")
+            rating = int(member.get("rating", 0))
+            
+            await callback.message.edit_text(
+                f"👥 <b>Заявка на пару #{element_id}</b>\n\n"
+                f"📌 Турнир: {event_title}\n"
+                f"{date_line}\n"
+                f"👤 Ваша роль: {role_text}\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👤 <b>Игрок:</b>\n"
+                f"• 📛 Имя: {username}\n"
+                f"• 🚻 Пол: {gender_label}\n"
+                f"• 📊 Рейтинг: {rating}\n\n"
+                f"📩 Входящих запросов: {len(pending_requests)}",
+                reply_markup=application_detail_kb(element_id, event_id, is_creator=is_creator),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                f"👥 <b>Заявка на пару #{element_id}</b>\n\n"
+                f"📌 Турнир: {event_title}\n"
+                f"{date_line}\n"
+                f"👤 Ваша роль: {role_text}\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👤 Участников пока нет\n"
+                f"📩 Входящих запросов: {len(pending_requests)}",
+                reply_markup=application_detail_kb(element_id, event_id, is_creator=is_creator),
+                parse_mode="HTML"
+            )
+    else:
+        # Для команд показываем количество и средний рейтинг
+        members_count = len(members)
+        members_text = "\n".join([f"• {format_member_info(m)}" for m in members]) if members else "Никого"
+        
+        # Рассчитываем средний рейтинг (целое число)
+        if members:
+            ratings = [m["rating"] for m in members if m.get("rating") is not None]
+            avg_rating = int(sum(ratings) / len(ratings)) if ratings else 0
+            avg_rating_text = f"\n⭐ Средний рейтинг команды: {avg_rating}"
+        else:
+            avg_rating_text = ""
+        
+        await callback.message.edit_text(
+            f"👨‍👩‍👧‍👦 <b>Командная заявка #{element_id}</b>\n\n"
+            f"📌 Турнир: {event_title}\n"
+            f"{date_line}\n"
+            f"👤 Ваша роль: {role_text}\n\n"
+            f"📝 Описание: {description}\n"
+            f"👥 Участники ({members_count}/{target_size}):\n{members_text}"
+            f"{avg_rating_text}\n"
+            f"🪑 Свободных мест: {spots_left}\n"
+            f"📩 Входящих запросов: {len(pending_requests)}",
+            reply_markup=application_detail_kb(element_id, event_id, is_creator=is_creator),
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("leave_element:"))
+async def cb_leave_element(callback: CallbackQuery, db: aiosqlite.Connection, bot: Bot):
+    """Покинуть заявку (для участников, не создателей)."""
+    element_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    
+    # Получаем заявку
+    element = await db_queries.get_element(db, element_id)
+    if not element:
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
+        return
+    
+    # Проверяем, что пользователь не создатель
+    if element["creator_id"] == user_id:
+        await callback.answer(
+            "❌ Вы создатель этой заявки.\n"
+            "Используйте «Удалить заявку» если хотите удалить её полностью.",
+            show_alert=True
+        )
+        return
+    
+    # Проверяем, что пользователь — участник
+    is_member = await db_queries.check_user_in_element(db, element_id, user_id)
+    if not is_member:
+        await callback.answer("❌ Вы не участник этой заявки", show_alert=True)
+        return
+    
+    event_id = element["event_id"]
+    event = await db_queries.get_event(db, event_id)
+    
+    # Получаем участников до удаления
+    members_before = await db_queries.get_element_members(db, element_id)
+    
+    # Удаляем пользователя из заявки
+    success = await db_queries.leave_element(db, element_id, user_id)
+    
+    if success:
+        # Логируем
+        await db_queries.create_log(
+            db,
+            "user_left_element",
+            f"element_id={element_id}, user_id={user_id}"
+        )
+        
+        # Уведомляем создателя
+        try:
+            user = await db_queries.get_user(db, user_id)
+            await bot.send_message(
+                element["creator_id"],
+                f"🚪 <b>Участник покинул заявку</b>\n\n"
+                f"📌 Турнир: {event['title']}\n"
+                f"📦 Заявка: #{element_id}\n\n"
+                f"👤 {user.get('username', 'Участник')} покинул команду.\n"
+                f"🪑 Теперь свободных мест: {element['target_size'] - len(members_before) + 1}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        
+        await callback.message.edit_text(
+            f"✅ <b>Вы покинули заявку</b>\n\n"
+            f"📌 Турнир: {event['title']}\n"
+            f"📦 Заявка: #{element_id}\n\n"
+            f"Создатель заявки получил уведомление.",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+        await callback.answer("Вы покинули заявку")
+    else:
+        await callback.answer("❌ Не удалось покинуть заявку", show_alert=True)

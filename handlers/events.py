@@ -21,7 +21,8 @@ from keyboards.inline import (
     confirm_kb,
     date_picker_kb,
     date_confirm_kb,
-    edit_event_kb
+    edit_event_kb,
+    skip_kb
 )
 from database import queries as db_queries
 
@@ -515,12 +516,13 @@ async def cb_event_groups(callback: CallbackQuery, db: aiosqlite.Connection):
         await callback.answer("📭 Пока нет сформированных групп", show_alert=True)
         return
     
+    # Формируем текст со списком групп
     groups_text = ""
-    for i, group in enumerate(groups[:10], 1):
+    for i, group in enumerate(groups[:10], 1):  # Показываем максимум 10
         members = group.get("members", [])
         members_names = ", ".join([m.get("username", "?") for m in members])
-        avg_rating = group.get("rating_avg", 0)
-        groups_text += f"\n{i}. ⭐ {avg_rating:.0f} — {members_names}"
+        avg_rating = int(group.get("rating_avg", 0))
+        groups_text += f"\n{i}. ⭐ {avg_rating} — {members_names}"
     
     total = len(groups)
     shown = min(total, 10)
@@ -586,6 +588,7 @@ async def fsm_event_type(callback: CallbackQuery, state: FSMContext):
         await state.set_state(CreateEventFSM.waiting_date)
         
         # Показываем календарь
+        from datetime import date
         today = date.today()
         await callback.message.edit_text(
             "✅ Тип: <b>👥 Пары (2 человека)</b>\n\n"
@@ -606,6 +609,7 @@ async def fsm_team_size(callback: CallbackQuery, state: FSMContext):
     await state.set_state(CreateEventFSM.waiting_date)
     
     # Показываем календарь
+    from datetime import date
     today = date.today()
     await callback.message.edit_text(
         f"✅ Размер команды: <b>{team_size} человек</b>\n\n"
@@ -705,12 +709,11 @@ async def fsm_calendar_ignore(callback: CallbackQuery):
 async def fsm_event_description(message: Message, state: FSMContext, db: aiosqlite.Connection):
     """Получили описание, создаём турнир."""
     description = message.text.strip()
-    if description == "-":
-        description = None
-    elif len(description) > 500:
+    
+    if len(description) > 500:
         await message.answer(
             "❌ Описание слишком длинное (максимум 500 символов).\n\n"
-            "Введите описание или отправьте <code>-</code> чтобы пропустить:",
+            "Введите описание:",
             parse_mode="HTML"
         )
         return
@@ -749,7 +752,7 @@ async def fsm_event_description(message: Message, state: FSMContext, db: aiosqli
         f"📌 Название: {data['title']}\n"
         f"🎯 Тип: {type_label}\n"
         f"📅 Дата: {date_text}\n"
-        f"📝 Описание: {description or '—'}\n\n"
+        f"📝 Описание: {description}\n\n"
         f"🆔 ID турнира: <code>{event_id}</code>"
         f"{auto_close_text}",
         reply_markup=event_menu_kb(event_id, is_owner=True),
@@ -859,9 +862,8 @@ async def cb_edit_event_description(callback: CallbackQuery, state: FSMContext, 
     await callback.message.edit_text(
         f"✏️ <b>Изменение описания</b>\n\n"
         f"Текущее описание:\n{description}\n\n"
-        f"Введите новое описание турнира\n"
-        f"(или отправьте <code>-</code> чтобы удалить описание):",
-        reply_markup=cancel_kb(),
+        f"Введите новое описание турнира:",
+        reply_markup=skip_kb(),  # Изменено с cancel_kb()
         parse_mode="HTML"
     )
     await callback.answer()
@@ -925,17 +927,51 @@ async def fsm_edit_title(message: Message, state: FSMContext, db: aiosqlite.Conn
         )
 
 
+@router.callback_query(EditEventFSM.waiting_new_description, F.data == "skip")
+async def fsm_edit_description_skip(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection):
+    """Пропустить/удалить описание."""
+    data = await state.get_data()
+    await state.clear()
+    
+    event_id = data["event_id"]
+    user_id = callback.from_user.id
+    new_description = None  # Удаляем описание
+    
+    # Обновляем в БД
+    success = await db_queries.update_event(
+        db,
+        event_id=event_id,
+        owner_id=user_id,
+        description=new_description
+    )
+    
+    if success:
+        # Логируем
+        await db_queries.create_log(
+            db,
+            "event_description_removed",
+            f"event_id={event_id}"
+        )
+        
+        await callback.message.edit_text(
+            f"✅ <b>Описание удалено</b>",
+            reply_markup=event_menu_kb(event_id, is_owner=True),
+            parse_mode="HTML"
+        )
+        await callback.answer("Описание удалено")
+    else:
+        await callback.answer("❌ Не удалось удалить описание", show_alert=True)
+
+
 @router.message(EditEventFSM.waiting_new_description)
 async def fsm_edit_description(message: Message, state: FSMContext, db: aiosqlite.Connection):
     """Получили новое описание."""
     new_description = message.text.strip()
     
-    if new_description == "-":
-        new_description = None
-    elif len(new_description) > 500:
+    if len(new_description) > 500:
         await message.answer(
             "❌ Описание слишком длинное (максимум 500 символов).\n\n"
-            "Введите новое описание или отправьте <code>-</code> чтобы удалить:",
+            "Введите новое описание:",
             parse_mode="HTML"
         )
         return
@@ -962,11 +998,9 @@ async def fsm_edit_description(message: Message, state: FSMContext, db: aiosqlit
             f"event_id={event_id}"
         )
         
-        desc_text = new_description or "Удалено"
-        
         await message.answer(
             f"✅ <b>Описание обновлено</b>\n\n"
-            f"Новое описание:\n{desc_text}",
+            f"Новое описание:\n{new_description}",
             reply_markup=event_menu_kb(event_id, is_owner=True),
             parse_mode="HTML"
         )
@@ -1150,6 +1184,52 @@ async def cb_back_edit_event(callback: CallbackQuery, db: aiosqlite.Connection, 
         f"<b>Описание:</b> {description}\n\n"
         f"Что вы хотите изменить?",
         reply_markup=edit_event_kb(event_id),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(CreateEventFSM.waiting_description, F.data == "skip")
+async def fsm_event_description_skip(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection):
+    """Пропустить описание турнира."""
+    data = await state.get_data()
+    await state.clear()
+    
+    user_id = callback.from_user.id
+    description = None  # Пропускаем описание
+    
+    # Создаём событие в БД
+    event_id = await db_queries.create_event(
+        db,
+        owner_id=user_id,
+        title=data["title"],
+        event_type=data["type"],
+        team_size=data["team_size"],
+        description=description,
+        event_date=data.get("event_date")
+    )
+    
+    # Логируем
+    await db_queries.create_log(
+        db,
+        "event_created",
+        f"event_id={event_id}, owner_id={user_id}, title={data['title']}, date={data.get('event_date')}"
+    )
+    
+    type_label = "👥 Пары" if data["type"] == "pair" else f"👨‍👩‍👧‍👦 Команды ({data['team_size']} чел.)"
+    
+    event_date = data.get("event_date")
+    date_text = format_date_ru(event_date) if event_date else "Не указана"
+    auto_close_text = "\n\n<i>⏰ Турнир автоматически закроется на следующий день после указанной даты</i>" if event_date else ""
+    
+    await callback.message.edit_text(
+        f"🎉 <b>Турнир создан!</b>\n\n"
+        f"📌 Название: {data['title']}\n"
+        f"🎯 Тип: {type_label}\n"
+        f"📅 Дата: {date_text}\n\n"
+        f"🆔 ID турнира: <code>{event_id}</code>"
+        f"{auto_close_text}",
+        reply_markup=event_menu_kb(event_id, is_owner=True),
         parse_mode="HTML"
     )
     await callback.answer()

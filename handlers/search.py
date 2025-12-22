@@ -1,5 +1,5 @@
 """
-Обработчики: /search, просмотр и присоединение к элементам.
+Обработчики: /search, просмотр и присоединение к заявкам.
 """
 
 from aiogram import Router, F, Bot
@@ -21,8 +21,8 @@ def format_member_info(member: dict) -> str:
     """Форматировать информацию об участнике."""
     gender_icon = "👨" if member.get("gender") == "male" else "👩" if member.get("gender") == "female" else "👤"
     username = member.get("username", "Без имени")
-    rating = member.get("rating", "?")
-    return f"{gender_icon} {username} — рейтинг: {rating}"
+    rating = member.get("rating", 0)
+    return f"{gender_icon} {username} — рейтинг: {int(rating)}"
 
 
 def format_members_list(members: list) -> str:
@@ -30,6 +30,38 @@ def format_members_list(members: list) -> str:
     if not members:
         return "Пока никого нет"
     return "\n".join([f"• {format_member_info(m)}" for m in members])
+
+
+def format_element_preview(element: dict) -> str:
+    """
+    Форматировать краткую информацию о заявке для списка.
+    Для пар: пол, имя, рейтинг
+    Для команд: количество участников, средний рейтинг
+    """
+    members = element.get("members", [])
+    event_type = element.get("event_type", "pair")
+    
+    if event_type == "pair":
+        # Для пар показываем информацию о единственном участнике
+        if members:
+            member = members[0]
+            gender_icon = "👨" if member.get("gender") == "male" else "👩" if member.get("gender") == "female" else "👤"
+            username = member.get("username", "Без имени")
+            rating = member.get("rating", 0)
+            return f"{gender_icon} {username}, ⭐{int(rating)}"
+        else:
+            return "Нет данных"
+    else:
+        # Для команд показываем количество участников и средний рейтинг
+        members_count = len(members)
+        target_size = element.get("target_size", 0)
+        
+        if members:
+            ratings = [m["rating"] for m in members if m.get("rating") is not None]
+            avg_rating = sum(ratings) / len(ratings) if ratings else 0
+            return f"{members_count}/{target_size} чел., ⭐{int(avg_rating)}"
+        else:
+            return f"{members_count}/{target_size} чел."
 
 
 # ==================== КОМАНДЫ ====================
@@ -75,14 +107,16 @@ async def cmd_search(message: Message, db: aiosqlite.Connection):
         await message.answer("❌ Этот турнир закрыт.")
         return
     
-    # Получаем открытые элементы
+    # Получаем открытые заявки
     elements = await db_queries.list_open_elements(db, event_id)
     
-    # Фильтруем элементы, где пользователь уже является участником
+    # Фильтруем заявки, где пользователь уже является участником
     filtered_elements = []
     for elem in elements:
         is_member = await db_queries.check_user_in_element(db, elem["element_id"], user_id)
         if not is_member:
+            # Добавляем информацию для отображения
+            elem["preview_info"] = format_element_preview(elem)
             filtered_elements.append(elem)
     
     type_label = "👥 Пары" if event["type"] == "pair" else f"👨‍👩‍👧‍👦 Команды ({event['team_size']} чел.)"
@@ -130,14 +164,16 @@ async def cb_search_elements(callback: CallbackQuery, db: aiosqlite.Connection):
         await callback.answer("❌ Этот турнир закрыт", show_alert=True)
         return
     
-    # Получаем открытые элементы
+    # Получаем открытые заявки
     elements = await db_queries.list_open_elements(db, event_id)
     
-    # Фильтруем элементы, где пользователь уже является участником
+    # Фильтруем заявки, где пользователь уже является участником
     filtered_elements = []
     for elem in elements:
         is_member = await db_queries.check_user_in_element(db, elem["element_id"], user_id)
         if not is_member:
+            # Добавляем информацию для отображения
+            elem["preview_info"] = format_element_preview(elem)
             filtered_elements.append(elem)
     
     type_label = "👥 Пары" if event["type"] == "pair" else f"👨‍👩‍👧‍👦 Команды ({event['team_size']} чел.)"
@@ -169,17 +205,19 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
     element_id = int(callback.data.split(":")[1])
     user_id = callback.from_user.id
     
-    # Получаем элемент
+    # Получаем заявку
     element = await db_queries.get_element(db, element_id)
     if not element:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
     
     if not element.get("is_active"):
-        await callback.answer("❌ Эта заявка уже неактивен", show_alert=True)
+        await callback.answer("❌ Эта заявка уже неактивна", show_alert=True)
         return
     
     event_id = element["event_id"]
+    event = await db_queries.get_event(db, event_id)
+    event_type = event.get("type", "pair")
     
     # Получаем участников
     members = await db_queries.get_element_members(db, element_id)
@@ -187,9 +225,6 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
     target_size = element["target_size"]
     spots_left = target_size - len(members)
     description = element.get("description") or "—"
-    
-    # Формируем список участников
-    members_text = format_members_list(members)
     
     # Проверяем, может ли пользователь присоединиться
     is_member = await db_queries.check_user_in_element(db, element_id, user_id)
@@ -204,24 +239,68 @@ async def cb_view_element(callback: CallbackQuery, db: aiosqlite.Connection):
     elif has_pending_request:
         status_text = "\n\n⏳ <i>Ваш запрос ожидает рассмотрения</i>"
     
-    # Рассчитываем средний рейтинг
-    if members:
-        ratings = [m["rating"] for m in members if m.get("rating") is not None]
-        avg_rating = sum(ratings) / len(ratings) if ratings else 0
-        avg_rating_text = f"\n⭐ Средний рейтинг: {avg_rating:.0f}"
+    # Формируем информацию в зависимости от типа турнира
+    if event_type == "pair":
+        # Для пар показываем детальную информацию об игроке
+        if members:
+            member = members[0]
+            gender_label = GENDER_LABELS.get(member.get("gender"), "Не указан")
+            username = member.get("username", "Без имени")
+            rating = int(member.get("rating", 0))
+            
+            await callback.message.edit_text(
+                f"👥 <b>Заявка на пару #{element_id}</b>\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👤 <b>Игрок:</b>\n"
+                f"• 📛 Имя: {username}\n"
+                f"• 🚻 Пол: {gender_label}\n"
+                f"• 📊 Рейтинг: {rating}\n\n"
+                f"{status_text}",
+                reply_markup=element_detail_kb(element_id, event_id, can_join=can_join),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                f"👥 <b>Заявка на пару #{element_id}</b>\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👤 Участников пока нет\n"
+                f"{status_text}",
+                reply_markup=element_detail_kb(element_id, event_id, can_join=can_join),
+                parse_mode="HTML"
+            )
     else:
-        avg_rating_text = ""
+        # Для команд показываем количество участников и средний рейтинг
+        members_count = len(members)
+        
+        if members:
+            ratings = [m["rating"] for m in members if m.get("rating") is not None]
+            avg_rating = int(sum(ratings) / len(ratings)) if ratings else 0
+            
+            # Список участников
+            members_text = format_members_list(members)
+            
+            await callback.message.edit_text(
+                f"👨‍👩‍👧‍👦 <b>Командная заявка #{element_id}</b>\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👥 <b>Участники ({members_count}/{target_size}):</b>\n"
+                f"{members_text}\n\n"
+                f"⭐ Средний рейтинг команды: <b>{avg_rating}</b>\n"
+                f"🪑 Свободных мест: {spots_left}"
+                f"{status_text}",
+                reply_markup=element_detail_kb(element_id, event_id, can_join=can_join),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text(
+                f"👨‍👩‍👧‍👦 <b>Командная заявка #{element_id}</b>\n\n"
+                f"📝 Описание: {description}\n\n"
+                f"👥 Участников: {members_count}/{target_size}\n"
+                f"🪑 Свободных мест: {spots_left}"
+                f"{status_text}",
+                reply_markup=element_detail_kb(element_id, event_id, can_join=can_join),
+                parse_mode="HTML"
+            )
     
-    await callback.message.edit_text(
-        f"🎯 <b>Заявка #{element_id}</b>\n\n"
-        f"📝 Описание: {description}\n"
-        f"👥 Участники ({len(members)}/{target_size}):\n{members_text}\n"
-        f"🪑 Свободных мест: {spots_left}"
-        f"{avg_rating_text}"
-        f"{status_text}",
-        reply_markup=element_detail_kb(element_id, event_id, can_join=can_join),
-        parse_mode="HTML"
-    )
     await callback.answer()
 
 
@@ -239,7 +318,7 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
         await callback.answer("❌ Сначала завершите регистрацию (/start)", show_alert=True)
         return
     
-    # Получаем элемент
+    # Получаем заявку
     element = await db_queries.get_element(db, element_id)
     if not element:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
@@ -257,7 +336,7 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
         await callback.answer("❌ Турнир закрыт", show_alert=True)
         return
     
-    # Проверяем, что пользователь не в этом элементе
+    # Проверяем, что пользователь не в этой заявке
     is_member = await db_queries.check_user_in_element(db, element_id, user_id)
     if is_member:
         await callback.answer("❌ Вы уже в этой заявке", show_alert=True)
@@ -272,7 +351,7 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
     # Проверяем, есть ли свободные места
     spots_left = await db_queries.get_element_spots_left(db, element_id)
     if spots_left <= 0:
-        await callback.answer("❌ В этом заявке больше нет свободных мест", show_alert=True)
+        await callback.answer("❌ В этой заявке больше нет свободных мест", show_alert=True)
         return
     
     # Создаём запрос на присоединение
@@ -289,17 +368,21 @@ async def cb_join_element(callback: CallbackQuery, db: aiosqlite.Connection, bot
         f"join_id={join_id}, element_id={element_id}, requester_id={user_id}"
     )
     
-    # Уведомляем владельца элемента
+    # Уведомляем владельца заявки
     try:
         gender_icon = "👨" if requester.get("gender") == "male" else "👩" if requester.get("gender") == "female" else "👤"
+        gender_label = GENDER_LABELS.get(requester.get("gender"), "Не указан")
+        rating = int(requester.get("rating", 0))
         
         from keyboards.inline import join_request_kb
         await bot.send_message(
             creator_id,
             f"📨 <b>Новый запрос на присоединение!</b>\n\n"
             f"К вашей заявке в турнире «{event['title']}»\n\n"
-            f"{gender_icon} <b>{requester.get('username', 'Без имени')}</b>\n"
-            f"📊 Рейтинг: {requester.get('rating', '?')}\n\n"
+            f"👤 <b>Игрок:</b>\n"
+            f"• {gender_icon} Имя: <b>{requester.get('username', 'Без имени')}</b>\n"
+            f"• 🚻 Пол: {gender_label}\n"
+            f"• 📊 Рейтинг: <b>{rating}</b>\n\n"
             f"Принять этого участника?",
             reply_markup=join_request_kb(join_id),
             parse_mode="HTML"

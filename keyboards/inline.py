@@ -15,6 +15,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="📋 Мои турниры", callback_data="my_events"),
+        InlineKeyboardButton(text="📦 Мои заявки", callback_data="my_applications")
+    )
+    builder.row(
         InlineKeyboardButton(text="🔎 Поиск турниров", callback_data="search_events")
     )
     builder.row(
@@ -272,13 +275,13 @@ def elements_list_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
     for elem in elements:
         elem_id = elem.get("element_id")
         spots_left = elem.get("spots_left", "?")
-        members_info = elem.get("members_info", "")
-        gender_icon = "👨" if elem.get("gender") == "male" else "👩" if elem.get("gender") == "female" else "👤"
-        username = elem.get("username", "Без имени")
-        rating = elem.get("rating", "?")
+        
+        # Используем preview_info если есть, иначе старый формат
+        preview_info = elem.get("preview_info", elem.get("members_info", ""))
+        
         builder.row(
             InlineKeyboardButton(
-                text=f"🎯 {gender_icon} {username} | {members_info}",
+                text=f"🎯 Мест: {spots_left} | {preview_info}",
                 callback_data=f"view_element:{elem_id}"
             )
         )
@@ -340,6 +343,85 @@ def my_elements_kb(elements: list, event_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="➕ Создать новый", callback_data=f"add_element:{event_id}")
     )
     builder.row(InlineKeyboardButton(text="🔙 К турниру", callback_data=f"event:view:{event_id}"))
+    return builder.as_markup()
+
+
+# ==================== ПРОПУСК ====================
+
+def skip_kb() -> InlineKeyboardMarkup:
+    """Кнопка пропустить и отмена."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+    )
+    return builder.as_markup()
+
+
+# ==================== МОИ ЗАЯВКИ ====================
+
+def my_applications_kb(elements: list) -> InlineKeyboardMarkup:
+    """Список заявок пользователя во всех турнирах."""
+    builder = InlineKeyboardBuilder()
+    
+    for elem in elements:
+        elem_id = elem.get("element_id")
+        event_title = elem.get("event_title", "Турнир")
+        members_count = elem.get("members_count", 0)
+        target = elem.get("target_size", 2)
+        pending_count = elem.get("pending_requests", 0)
+        
+        # Иконка типа турнира
+        event_type = elem.get("event_type", "pair")
+        type_icon = "👥" if event_type == "pair" else "👨‍👩‍👧‍👦"
+        
+        # Бейдж входящих запросов
+        pending_badge = f" 📩{pending_count}" if pending_count > 0 else ""
+        
+        # Обрезаем название если слишком длинное
+        if len(event_title) > 20:
+            event_title = event_title[:17] + "..."
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{type_icon} {event_title} ({members_count}/{target}){pending_badge}",
+                callback_data=f"view_my_application:{elem_id}"
+            )
+        )
+    
+    if not elements:
+        builder.row(
+            InlineKeyboardButton(text="📭 У вас нет заявок", callback_data="noop")
+        )
+    
+    builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_main"))
+    return builder.as_markup()
+
+
+def application_detail_kb(element_id: int, event_id: int, is_creator: bool = True) -> InlineKeyboardMarkup:
+    """Детали заявки с действиями."""
+    builder = InlineKeyboardBuilder()
+    
+    if is_creator:
+        builder.row(
+            InlineKeyboardButton(text="👀 Входящие запросы", callback_data=f"view_requests:{element_id}")
+        )
+        builder.row(
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"element_members:{element_id}"),
+            InlineKeyboardButton(text="🗑 Удалить заявку", callback_data=f"delete_element:{element_id}")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"element_members:{element_id}")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🚪 Покинуть заявку", callback_data=f"leave_element:{element_id}")
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="🏆 К турниру", callback_data=f"event:view:{event_id}"),
+        InlineKeyboardButton(text="🔙 Мои заявки", callback_data="my_applications")
+    )
     return builder.as_markup()
 
 
