@@ -20,8 +20,10 @@ from keyboards.inline import (
     add_type_kb,
     skip_kb,
     my_applications_kb,
-    application_detail_kb
+    application_detail_kb,
+    group_detail_kb  # Добавить
 )
+
 
 from database import queries as db_queries
 
@@ -989,7 +991,7 @@ async def cb_back_my_elements(callback: CallbackQuery, state: FSMContext, db: ai
 
 @router.message(Command("my_applications"))
 async def cmd_my_applications(message: Message, db: aiosqlite.Connection):
-    """Показать все заявки пользователя."""
+    """Показать все заявки и группы пользователя."""
     user_id = message.from_user.id
     
     # Проверяем регистрацию
@@ -1000,13 +1002,15 @@ async def cmd_my_applications(message: Message, db: aiosqlite.Connection):
         )
         return
     
-    # Получаем все заявки пользователя в открытых турнирах
-    elements = await db_queries.get_all_user_elements_in_open_events(db, user_id)
+    # Получаем заявки и группы в открытых турнирах
+    data = await db_queries.get_all_user_elements_and_groups_in_open_events(db, user_id)
+    elements = data["active_elements"]
+    groups = data["groups"]
     
-    if not elements:
+    if not elements and not groups:
         await message.answer(
             "📦 <b>Мои заявки</b>\n\n"
-            "У вас пока нет активных заявок в открытых турнирах.\n\n"
+            "У вас пока нет активных заявок и сформированных групп в открытых турнирах.\n\n"
             "Найдите турнир и добавьте себя!",
             reply_markup=main_menu_kb(),
             parse_mode="HTML"
@@ -1017,10 +1021,12 @@ async def cmd_my_applications(message: Message, db: aiosqlite.Connection):
     total_pending = sum(elem.get("pending_requests", 0) for elem in elements)
     
     await message.answer(
-        f"📦 <b>Мои заявки ({len(elements)})</b>\n\n"
+        f"📦 <b>Мои заявки</b>\n\n"
+        f"📋 Активных заявок: {len(elements)}\n"
+        f"✅ Сформированных групп: {len(groups)}\n"
         f"📩 Всего входящих запросов: {total_pending}\n\n"
-        "Выберите заявку для просмотра:",
-        reply_markup=my_applications_kb(elements),
+        "Выберите для просмотра:",
+        reply_markup=my_applications_kb(elements, groups),
         parse_mode="HTML"
     )
 
@@ -1035,13 +1041,15 @@ async def cb_my_applications(callback: CallbackQuery, db: aiosqlite.Connection):
         await callback.answer("❌ Сначала завершите регистрацию (/start)", show_alert=True)
         return
     
-    # Получаем все заявки пользователя в открытых турнирах
-    elements = await db_queries.get_all_user_elements_in_open_events(db, user_id)
+    # Получаем заявки и группы в открытых турнирах
+    data = await db_queries.get_all_user_elements_and_groups_in_open_events(db, user_id)
+    elements = data["active_elements"]
+    groups = data["groups"]
     
-    if not elements:
+    if not elements and not groups:
         await callback.message.edit_text(
             "📦 <b>Мои заявки</b>\n\n"
-            "У вас пока нет активных заявок в открытых турнирах.\n\n"
+            "У вас пока нет активных заявок и сформированных групп в открытых турнирах.\n\n"
             "Найдите турнир и добавьте себя!",
             reply_markup=main_menu_kb(),
             parse_mode="HTML"
@@ -1053,14 +1061,111 @@ async def cb_my_applications(callback: CallbackQuery, db: aiosqlite.Connection):
     total_pending = sum(elem.get("pending_requests", 0) for elem in elements)
     
     await callback.message.edit_text(
-        f"📦 <b>Мои заявки ({len(elements)})</b>\n\n"
+        f"📦 <b>Мои заявки</b>\n\n"
+        f"📋 Активных заявок: {len(elements)}\n"
+        f"✅ Сформированных групп: {len(groups)}\n"
         f"📩 Всего входящих запросов: {total_pending}\n\n"
-        "Выберите заявку для просмотра:",
-        reply_markup=my_applications_kb(elements),
+        "Выберите для просмотра:",
+        reply_markup=my_applications_kb(elements, groups),
         parse_mode="HTML"
     )
     await callback.answer()
 
+
+@router.callback_query(F.data.startswith("view_my_group:"))
+async def cb_view_my_group(callback: CallbackQuery, db: aiosqlite.Connection):
+    """Просмотр сформированной группы."""
+    group_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    
+    # Получаем группу
+    group = await db_queries.get_group(db, group_id)
+    if not group:
+        await callback.answer("❌ Группа не найдена", show_alert=True)
+        return
+    
+    event_id = group["event_id"]
+    event = await db_queries.get_event(db, event_id)
+    event_type = event.get("type", "pair")
+    
+    # Получаем участников с контактами
+    members = await db_queries.get_group_members_with_contacts(db, group_id)
+    
+    # Проверяем, что пользователь в группе
+    if user_id not in [m["user_id"] for m in members]:
+        await callback.answer("❌ Вы не состоите в этой группе", show_alert=True)
+        return
+    
+    avg_rating = int(group.get("rating_avg", 0))
+    event_title = group.get("event_title", "Турнир")
+    event_date = event.get("event_date")
+    
+    # Дата турнира
+    from handlers.events import format_date_ru, get_days_until
+    date_text = format_date_ru(event_date) if event_date else "Не указана"
+    days_until = get_days_until(event_date) if event_date else ""
+    date_line = f"📅 Дата турнира: {date_text}"
+    if days_until:
+        date_line += f" ({days_until})"
+    
+    # Формируем список участников с контактами
+    def format_member_with_contact_full(member: dict, is_current_user: bool = False) -> str:
+        """Форматировать участника с полной информацией."""
+        gender_icon = "👨" if member.get("gender") == "male" else "👩" if member.get("gender") == "female" else "👤"
+        username = member.get("username", "Без имени")
+        rating = int(member.get("rating", 0))
+        telegram_username = member.get("telegram_username")
+        
+        info = f"{gender_icon} <b>{username}</b> — рейтинг: {rating}"
+        
+        if is_current_user:
+            info += " (вы)"
+        else:
+            # Добавляем контакт
+            if telegram_username:
+                contact = f"@{telegram_username}"
+            else:
+                contact = f"<a href='tg://user?id={member['user_id']}'>написать</a>"
+            info += f"\n   📱 Контакт: {contact}"
+        
+        return info
+    
+    members_text = ""
+    for m in members:
+        is_current = m["user_id"] == user_id
+        members_text += f"\n• {format_member_with_contact_full(m, is_current)}"
+    
+    if event_type == "pair":
+        # Для пары
+        await callback.message.edit_text(
+            f"✅ <b>Сформированная пара</b>\n\n"
+            f"📌 Турнир: {event_title}\n"
+            f"{date_line}\n\n"
+            f"⭐ Средний рейтинг: {avg_rating}\n\n"
+            f"👥 <b>Участники:</b>"
+            f"{members_text}\n\n"
+            f"💬 Свяжитесь с партнёром для координации!\n"
+            f"🆔 Группа: <code>{group_id}</code>",
+            reply_markup=group_detail_kb(group_id, event_id),
+            parse_mode="HTML"
+        )
+    else:
+        # Для команды
+        await callback.message.edit_text(
+            f"✅ <b>Сформированная команда</b>\n\n"
+            f"📌 Турнир: {event_title}\n"
+            f"{date_line}\n\n"
+            f"⭐ Средний рейтинг команды: {avg_rating}\n"
+            f"👥 Участников: {len(members)}\n\n"
+            f"<b>Участники:</b>"
+            f"{members_text}\n\n"
+            f"💬 Свяжитесь с командой для координации!\n"
+            f"🆔 Группа: <code>{group_id}</code>",
+            reply_markup=group_detail_kb(group_id, event_id),
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("view_my_application:"))
 async def cb_view_my_application(callback: CallbackQuery, db: aiosqlite.Connection):

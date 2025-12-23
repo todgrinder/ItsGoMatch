@@ -939,13 +939,8 @@ async def get_logs(
 async def accept_join_request(db: aiosqlite.Connection, join_id: int) -> Dict[str, Any]:
     """
     Принять запрос на присоединение.
-    Возвращает словарь с информацией о результате:
-    - success: bool
-    - group_created: bool (если элемент заполнен)
-    - group_id: int (если создана группа)
-    - element_id: int
-    - event_id: int
-    - member_ids: List[int] (все участники)
+    Автоматически удаляет заявки принятого пользователя в этом турнире.
+    Возвращает словарь с информацией о результате.
     """
     result = {
         "success": False,
@@ -953,7 +948,8 @@ async def accept_join_request(db: aiosqlite.Connection, join_id: int) -> Dict[st
         "group_id": None,
         "element_id": None,
         "event_id": None,
-        "member_ids": []
+        "member_ids": [],
+        "deleted_user_elements": 0  # Количество удалённых заявок пользователя
     }
     
     # Получаем информацию о запросе
@@ -968,7 +964,7 @@ async def accept_join_request(db: aiosqlite.Connection, join_id: int) -> Dict[st
     result["element_id"] = element_id
     result["event_id"] = event_id
     
-    # Проверяем, что в элементе есть место
+    # Проверяем, что в заявке есть место
     spots_left = await get_element_spots_left(db, element_id)
     if spots_left <= 0:
         await update_join_request_status(db, join_id, "rejected")
@@ -977,24 +973,34 @@ async def accept_join_request(db: aiosqlite.Connection, join_id: int) -> Dict[st
     # Принимаем запрос
     await update_join_request_status(db, join_id, "accepted")
     
-    # Добавляем пользователя в элемент
+    # Добавляем пользователя в заявку
     await add_element_member(db, element_id, requester_id)
+    
+    # ВАЖНО: Удаляем все заявки принятого пользователя в этом турнире
+    deleted_created = await delete_user_elements_in_event(db, event_id, requester_id)
+    deleted_joined = await remove_user_from_all_elements_in_event(db, event_id, requester_id)
+    result["deleted_user_elements"] = deleted_created + deleted_joined
     
     result["success"] = True
     
-    # Проверяем, заполнен ли теперь элемент
+    # Проверяем, заполнена ли теперь заявка
     if await is_element_full(db, element_id):
         # Получаем всех участников
         members = await get_element_members(db, element_id)
         member_ids = [m["user_id"] for m in members]
         result["member_ids"] = member_ids
         
+        # ВАЖНО: Удаляем заявки всех участников группы в этом турнире
+        for member_id in member_ids:
+            await delete_user_elements_in_event(db, event_id, member_id)
+            await remove_user_from_all_elements_in_event(db, event_id, member_id)
+        
         # Создаём группу
         group_id = await create_group(db, event_id, member_ids)
         result["group_created"] = True
         result["group_id"] = group_id
         
-        # Деактивируем элемент
+        # Деактивируем заявку
         await deactivate_element(db, element_id)
         
         # Отклоняем все оставшиеся запросы
@@ -1052,6 +1058,139 @@ async def get_event_statistics(db: aiosqlite.Connection, event_id: int) -> Dict[
         "users_in_groups": users_in_groups,
         "pending_requests": pending_requests
     }
+
+
+# ==================== ELEMENTS (обновить функцию) ====================
+
+async def get_all_user_elements_and_groups_in_open_events(db: aiosqlite.Connection, user_id: int) -> dict:
+    """
+    Получить все заявки и группы пользователя в открытых турнирах.
+    Возвращает словарь: {
+        "active_elements": [...],  # Активные заявки
+        "groups": [...]            # Сформированные группы
+    }
+    """
+    # Активные заявки
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT
+            e.element_id,
+            e.event_id,
+            e.creator_id,
+            e.target_size,
+            e.description,
+            e.created_at,
+            e.is_active,
+            ev.title as event_title,
+            ev.type as event_type,
+            ev.event_date,
+            (SELECT COUNT(*) FROM element_members em WHERE em.element_id = e.element_id) as members_count,
+            (SELECT COUNT(*) FROM join_requests jr WHERE jr.element_id = e.element_id AND jr.status = 'pending') as pending_requests
+        FROM elements e
+        LEFT JOIN element_members em ON e.element_id = em.element_id
+        LEFT JOIN events ev ON e.event_id = ev.event_id
+        WHERE e.is_active = 1
+          AND ev.status = 'open'
+          AND (e.creator_id = ? OR em.user_id = ?)
+        ORDER BY ev.event_date ASC NULLS LAST, e.created_at DESC
+        """,
+        (user_id, user_id)
+    )
+    active_elements = rows_to_list(await cursor.fetchall())
+    
+    # Сформированные группы в открытых турнирах
+    cursor = await db.execute(
+        """
+        SELECT 
+            g.group_id,
+            g.event_id,
+            g.created_at,
+            g.rating_avg,
+            ev.title as event_title,
+            ev.type as event_type,
+            ev.event_date,
+            (SELECT COUNT(*) FROM group_members gm2 WHERE gm2.group_id = g.group_id) as members_count
+        FROM groups g
+        JOIN group_members gm ON g.group_id = gm.group_id
+        JOIN events ev ON g.event_id = ev.event_id
+        WHERE gm.user_id = ?
+          AND ev.status = 'open'
+        ORDER BY ev.event_date ASC NULLS LAST, g.created_at DESC
+        """,
+        (user_id,)
+    )
+    groups = rows_to_list(await cursor.fetchall())
+    
+    return {
+        "active_elements": active_elements,
+        "groups": groups
+    }
+
+
+async def delete_user_elements_in_event(db: aiosqlite.Connection, event_id: int, user_id: int) -> int:
+    """
+    Удалить все заявки пользователя в конкретном событии (где он создатель).
+    Возвращает количество удалённых заявок.
+    """
+    cursor = await db.execute(
+        """
+        DELETE FROM elements
+        WHERE event_id = ? AND creator_id = ?
+        """,
+        (event_id, user_id)
+    )
+    await db.commit()
+    return cursor.rowcount
+
+
+async def remove_user_from_all_elements_in_event(db: aiosqlite.Connection, event_id: int, user_id: int) -> int:
+    """
+    Удалить пользователя из всех заявок в событии (где он участник, но не создатель).
+    Если после удаления в заявке остаётся только создатель или никого — удаляет заявку полностью.
+    Возвращает количество заявок, из которых пользователь был удалён.
+    """
+    # Находим все заявки в событии, где пользователь участник
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT e.element_id, e.creator_id
+        FROM elements e
+        JOIN element_members em ON e.element_id = em.element_id
+        WHERE e.event_id = ? AND em.user_id = ? AND e.creator_id != ?
+        """,
+        (event_id, user_id, user_id)
+    )
+    elements = await cursor.fetchall()
+    
+    count = 0
+    for row in elements:
+        element_id = row[0]
+        
+        # Удаляем пользователя из участников
+        await db.execute(
+            "DELETE FROM element_members WHERE element_id = ? AND user_id = ?",
+            (element_id, user_id)
+        )
+        count += 1
+        
+        # Проверяем, сколько участников осталось
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM element_members WHERE element_id = ?",
+            (element_id,)
+        )
+        members_left = (await cursor.fetchone())[0]
+        
+        # Если остался только создатель или никого — оставляем заявку
+        # (создатель может продолжить искать команду)
+        # Но если вообще никого не осталось — удаляем
+        if members_left == 0:
+            await db.execute(
+                "DELETE FROM elements WHERE element_id = ?",
+                (element_id,)
+            )
+    
+    await db.commit()
+    return count
+
 
 # ==================== BLACKLIST ====================
 

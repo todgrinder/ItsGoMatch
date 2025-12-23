@@ -418,7 +418,7 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
         await callback.answer("❌ Запрос не найден", show_alert=True)
         return
     
-    # Проверяем, что пользователь — владелец элемента
+    # Проверяем, что пользователь — владелец заявки
     if request["element_creator_id"] != user_id:
         await callback.answer("❌ Вы не владелец этой заявки", show_alert=True)
         return
@@ -442,16 +442,21 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
     await db_queries.create_log(
         db,
         "join_request_accepted",
-        f"join_id={join_id}, element_id={request['element_id']}, requester_id={request['requester_id']}"
+        f"join_id={join_id}, element_id={request['element_id']}, requester_id={request['requester_id']}, deleted_elements={result['deleted_user_elements']}"
     )
     
     # Уведомляем отправителя запроса
+    deleted_info = ""
+    if result["deleted_user_elements"] > 0:
+        deleted_info = f"\n\n<i>Ваши {result['deleted_user_elements']} заявок в этом турнире были автоматически удалены.</i>"
+    
     try:
         await bot.send_message(
             request["requester_id"],
             f"✅ <b>Ваш запрос принят!</b>\n\n"
             f"📌 Турнир: {event['title']}\n\n"
-            f"Вы добавлены в заявку #{request['element_id']}.",
+            f"Вы добавлены в заявку #{request['element_id']}."
+            f"{deleted_info}",
             parse_mode="HTML"
         )
     except Exception:
@@ -476,10 +481,15 @@ async def cb_accept_request(callback: CallbackQuery, db: aiosqlite.Connection, b
         element = await db_queries.get_element(db, request["element_id"])
         spots_left = element["target_size"] - len(members)
         
+        deleted_text = ""
+        if result["deleted_user_elements"] > 0:
+            deleted_text = f"\n\n<i>Автоматически удалено заявок игрока: {result['deleted_user_elements']}</i>"
+        
         await callback.message.edit_text(
             f"✅ <b>Запрос #{join_id} принят!</b>\n\n"
             f"👤 {requester.get('username', 'Пользователь')} добавлен в заявку.\n"
-            f"🪑 Осталось мест: {spots_left}",
+            f"🪑 Осталось мест: {spots_left}"
+            f"{deleted_text}",
             reply_markup=manage_element_kb(request["element_id"], request["event_id"]),
             parse_mode="HTML"
         )

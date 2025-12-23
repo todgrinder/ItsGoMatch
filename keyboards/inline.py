@@ -306,6 +306,20 @@ def element_detail_kb(element_id: int, event_id: int, can_join: bool = True) -> 
     return builder.as_markup()
 
 
+# ==================== ДЕТАЛИ ГРУППЫ ====================
+
+def group_detail_kb(group_id: int, event_id: int) -> InlineKeyboardMarkup:
+    """Детали сформированной группы."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🏆 К турниру", callback_data=f"event:view:{event_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Мои заявки", callback_data="my_applications")
+    )
+    return builder.as_markup()
+
+
 # ==================== УПРАВЛЕНИЕ ЗАПРОСОМ ====================
 
 def join_request_kb(join_id: int) -> InlineKeyboardMarkup:
@@ -360,10 +374,15 @@ def skip_kb() -> InlineKeyboardMarkup:
 
 # ==================== МОИ ЗАЯВКИ ====================
 
-def my_applications_kb(elements: list) -> InlineKeyboardMarkup:
-    """Список заявок пользователя во всех турнирах."""
+def my_applications_kb(elements: list, groups: list) -> InlineKeyboardMarkup:
+    """
+    Список заявок и групп пользователя во всех турнирах.
+    elements - активные заявки
+    groups - сформированные группы
+    """
     builder = InlineKeyboardBuilder()
     
+    # Сначала активные заявки
     for elem in elements:
         elem_id = elem.get("element_id")
         event_title = elem.get("event_title", "Турнир")
@@ -379,19 +398,41 @@ def my_applications_kb(elements: list) -> InlineKeyboardMarkup:
         pending_badge = f" 📩{pending_count}" if pending_count > 0 else ""
         
         # Обрезаем название если слишком длинное
-        if len(event_title) > 20:
-            event_title = event_title[:17] + "..."
+        if len(event_title) > 18:
+            event_title = event_title[:15] + "..."
         
         builder.row(
             InlineKeyboardButton(
-                text=f"{type_icon} {event_title} ({members_count}/{target}){pending_badge}",
+                text=f"📦 {type_icon} {event_title} ({members_count}/{target}){pending_badge}",
                 callback_data=f"view_my_application:{elem_id}"
             )
         )
     
-    if not elements:
+    # Затем сформированные группы
+    for group in groups:
+        group_id = group.get("group_id")
+        event_title = group.get("event_title", "Турнир")
+        members_count = group.get("members_count", 0)
+        avg_rating = int(group.get("rating_avg", 0))
+        
+        # Иконка типа турнира
+        event_type = group.get("event_type", "pair")
+        type_icon = "👥" if event_type == "pair" else "👨‍👩‍👧‍👦"
+        
+        # Обрезаем название если слишком длинное
+        if len(event_title) > 18:
+            event_title = event_title[:15] + "..."
+        
         builder.row(
-            InlineKeyboardButton(text="📭 У вас нет заявок", callback_data="noop")
+            InlineKeyboardButton(
+                text=f"✅ {type_icon} {event_title} ({members_count} чел., ⭐{avg_rating})",
+                callback_data=f"view_my_group:{group_id}"
+            )
+        )
+    
+    if not elements and not groups:
+        builder.row(
+            InlineKeyboardButton(text="📭 У вас нет заявок и групп", callback_data="noop")
         )
     
     builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_main"))
